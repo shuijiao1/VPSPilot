@@ -11,6 +11,8 @@ cd JiaoOps
 # 编辑 .env：填 BOT_TOKEN、ALLOWED_USERS / ADMIN_USERS
 docker compose -f docker-compose.example.yml up -d --build
 
+# 也可以直接使用公开镜像：ghcr.io/shuijiao1/jiaoops:latest
+
 # 或者用 Makefile
 make init
 make up
