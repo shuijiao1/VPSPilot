@@ -1,0 +1,13 @@
+services:
+  jiaoops-bot:
+    build:
+      context: .
+      dockerfile: telegram-bot/Dockerfile
+    container_name: jiaoops-bot
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./servers.json:/data/servers.json
+      - ./keys:/data/keys
+      - ./media:/data/media
+      - ./tmp:/data/tmp

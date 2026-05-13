@@ -1,0 +1,13 @@
+.git
+.env
+servers.json
+servers.yml
+docker-compose.yml
+keys/
+media/
+tmp/
+results/
+backups/
+__pycache__/
+*.pyc
+*.bak*

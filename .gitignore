@@ -1,0 +1,11 @@
+# secrets / runtime data
+.env
+servers.json
+servers.yml
+keys/
+media/
+tmp/
+results/
+*.bak*
+__pycache__/
+*.pyc

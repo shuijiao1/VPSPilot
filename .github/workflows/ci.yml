@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Python compile
+        run: python -m py_compile auth.py jiaoops.py telegram-bot/bot.py optional/update_from_nezha.py
+      - name: Secret grep
+        run: |
+          ! grep -R "BEGIN .*PRIVATE KEY" -n . --exclude-dir=.git
+          ! grep -R "BOT_TOKEN=.*[0-9][0-9][0-9].*:" -n . --exclude=.env.example --exclude-dir=.git
+      - name: Docker build
+        run: docker build -f telegram-bot/Dockerfile .

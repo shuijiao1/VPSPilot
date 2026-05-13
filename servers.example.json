@@ -1,0 +1,43 @@
+{
+  "defaults": {
+    "ssh": {
+      "user": "root",
+      "port": 22,
+      "key": "~/.ssh/id_ed25519"
+    }
+  },
+  "servers": [
+    {
+      "name": "hk-01",
+      "host": "203.0.113.10",
+      "aliases": ["香港1"],
+      "role": "vps"
+    },
+    {
+      "name": "jp-custom-port",
+      "host": "203.0.113.20",
+      "ssh": {
+        "user": "debian",
+        "port": 2222,
+        "key": "~/.ssh/jp_ed25519"
+      }
+    },
+    {
+      "name": "sg-password",
+      "host": "203.0.113.30",
+      "ssh": {
+        "user": "root",
+        "port": 22,
+        "auth": "password",
+        "password": "change-me"
+      }
+    },
+    {
+      "name": "legacy-compatible",
+      "host": "203.0.113.40",
+      "user": "root",
+      "port": 53580,
+      "key": "/data/keys/legacy_key"
+    }
+  ]
+}
