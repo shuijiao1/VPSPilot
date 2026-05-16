@@ -1,6 +1,6 @@
-# VPSPilot
+# GUKO
 
-[![Docker Image](https://img.shields.io/badge/ghcr.io-vpspilot-blue?logo=docker)](https://github.com/shuijiao1/VPSPilot/pkgs/container/vpspilot)
+[![Docker Image](https://img.shields.io/badge/ghcr.io-guko-blue?logo=docker)](https://github.com/shuijiao1/GUKO/pkgs/container/guko)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **中文** | [English](README.en.md)
@@ -36,23 +36,23 @@
 ### 方式一：Docker Compose（推荐，无需 git clone）
 
 ```bash
-mkdir -p vpspilot/keys vpspilot/media vpspilot/tmp
-cd vpspilot
+mkdir -p guko/keys guko/media guko/tmp
+cd guko
 
-curl -Lo docker-compose.yml https://raw.githubusercontent.com/shuijiao1/VPSPilot/main/docker-compose.example.yml
+curl -Lo docker-compose.yml https://raw.githubusercontent.com/shuijiao1/GUKO/main/docker-compose.example.yml
 
 cat > .env <<'EOF'
 BOT_TOKEN=replace-me
 ALLOWED_USERS=123456789
 ADMIN_USERS=123456789
 DATA_DIR=/data
-VPSPILOT_INV=/data/servers.json
+GUKO_INV=/data/servers.json
 MEDIA_DIR=/data/media
 TMP_DIR=/data/tmp
 KEYS_DIR=/data/keys
-VPSPILOT_DEFAULT_USER=root
-VPSPILOT_DEFAULT_PORT=22
-VPSPILOT_DEFAULT_KEY=/data/keys/id_ed25519
+GUKO_DEFAULT_USER=root
+GUKO_DEFAULT_PORT=22
+GUKO_DEFAULT_KEY=/data/keys/id_ed25519
 ENABLE_REMOTE_RUN=false
 ENABLE_BGP=true
 ENABLE_IPPURE=true
@@ -96,21 +96,21 @@ ADMIN_USERS=123456789
 ### 方式二：源码构建（开发用）
 
 ```bash
-git clone https://github.com/shuijiao1/VPSPilot.git
-cd VPSPilot
+git clone https://github.com/shuijiao1/GUKO.git
+cd GUKO
 cp .env.example .env
 cp servers.example.json servers.json
 mkdir -p keys media tmp
 nano .env
-docker build -f telegram-bot/Dockerfile -t vpspilot:local .
-docker run -d --name vpspilot-bot --restart unless-stopped \
+docker build -f telegram-bot/Dockerfile -t guko:local .
+docker run -d --name guko-bot --restart unless-stopped \
   --env-file .env \
   -v ./servers.json:/data/servers.json \
   -v ./keys:/data/keys \
   -v ./media:/data/media \
   -v ./tmp:/data/tmp \
-  vpspilot:local
-docker logs -f vpspilot-bot
+  guko:local
+docker logs -f guko-bot
 ```
 
 ---
@@ -125,7 +125,7 @@ docker logs -f vpspilot-bot
 /start
 ```
 
-Bot 会显示 VPSPilot 总览面板，可以点服务器查看详情。
+Bot 会显示 GUKO 总览面板，可以点服务器查看详情。
 
 ### 添加服务器
 
@@ -152,7 +152,7 @@ jp-01 203.0.113.20:2222 debian
 
 然后 Bot 会询问登录方式：
 
-- **沿用默认密钥/配置**：使用 `VPSPILOT_DEFAULT_KEY` 或 `servers.json` 里的 `defaults.ssh.key`。
+- **沿用默认密钥/配置**：使用 `GUKO_DEFAULT_KEY` 或 `servers.json` 里的 `defaults.ssh.key`。
 - **使用已有密钥路径**：发送 `/data/keys/id_ed25519` 这类路径。
 - **上传/粘贴新私钥**：发送 SSH 私钥文本，或直接上传私钥文件；Bot 会保存到 `/data/keys/`，权限设为 `600`，并尝试 SSH 登录测试。
 - **使用密码**：发送 SSH 密码；Bot 会保存配置并尝试登录测试。
@@ -201,7 +201,7 @@ jp-01 203.0.113.20 2222 debian password:your-password
 
 ### 命令
 
-- `/start` — 打开 VPSPilot 面板
+- `/start` — 打开 GUKO 面板
 - `/list` — 查看服务器列表
 - `/status` — 查看总览状态
 - `/addserver` — 添加 / 批量导入服务器
@@ -226,13 +226,13 @@ BOT_TOKEN=replace-me
 ALLOWED_USERS=123456789
 ADMIN_USERS=123456789
 DATA_DIR=/data
-VPSPILOT_INV=/data/servers.json
+GUKO_INV=/data/servers.json
 MEDIA_DIR=/data/media
 TMP_DIR=/data/tmp
 KEYS_DIR=/data/keys
-VPSPILOT_DEFAULT_USER=root
-VPSPILOT_DEFAULT_PORT=22
-VPSPILOT_DEFAULT_KEY=/data/keys/id_ed25519
+GUKO_DEFAULT_USER=root
+GUKO_DEFAULT_PORT=22
+GUKO_DEFAULT_KEY=/data/keys/id_ed25519
 ENABLE_REMOTE_RUN=false
 ENABLE_BGP=true
 ENABLE_IPPURE=true
@@ -250,13 +250,13 @@ ALLOW_INSECURE_STARTUP=false
 | `ALLOWED_USERS` | 是 | - | 允许使用 Bot 的 Telegram 数字 ID，多个用英文逗号分隔 |
 | `ADMIN_USERS` | 否 | `ALLOWED_USERS` | 管理员 ID，能添加 / 删除服务器、执行高危功能 |
 | `DATA_DIR` | 否 | `/data` | 容器内数据目录 |
-| `VPSPILOT_INV` | 否 | `/data/servers.json` | 服务器清单路径 |
+| `GUKO_INV` | 否 | `/data/servers.json` | 服务器清单路径 |
 | `MEDIA_DIR` | 否 | `/data/media` | 图片和报告输出目录 |
 | `TMP_DIR` | 否 | `/data/tmp` | 临时文件目录 |
 | `KEYS_DIR` | 否 | `/data/keys` | SSH 私钥保存目录 |
-| `VPSPILOT_DEFAULT_USER` | 否 | `root` | 默认 SSH 用户 |
-| `VPSPILOT_DEFAULT_PORT` | 否 | `22` | 默认 SSH 端口 |
-| `VPSPILOT_DEFAULT_KEY` | 否 | `/data/keys/id_ed25519` | 默认 SSH 私钥路径 |
+| `GUKO_DEFAULT_USER` | 否 | `root` | 默认 SSH 用户 |
+| `GUKO_DEFAULT_PORT` | 否 | `22` | 默认 SSH 端口 |
+| `GUKO_DEFAULT_KEY` | 否 | `/data/keys/id_ed25519` | 默认 SSH 私钥路径 |
 | `ENABLE_REMOTE_RUN` | 否 | `false` | 是否启用 `/run` 远程执行命令 |
 | `ENABLE_BGP` | 否 | `true` | 是否启用 BGP 图功能 |
 | `ENABLE_IPPURE` | 否 | `true` | 是否启用 IPPure 图功能 |
@@ -278,7 +278,7 @@ ALLOW_INSECURE_STARTUP=false
 所有持久化数据在安装目录下：
 
 ```text
-VPSPilot/
+GUKO/
 ├── docker-compose.example.yml
 ├── .env
 ├── servers.json       # 私有服务器清单
@@ -370,8 +370,8 @@ make down
 批量添加后可以测试：
 
 ```bash
-./vpspilot.py list
-./vpspilot.py run hk-01 'hostname'
+./guko.py list
+./guko.py run hk-01 'hostname'
 ```
 
 Bot 内还可以导出脱敏配置：
@@ -394,8 +394,8 @@ Bot 内还可以导出脱敏配置：
 ## 🧩 源码运行（开发用）
 
 ```bash
-git clone https://github.com/shuijiao1/VPSPilot.git
-cd VPSPilot
+git clone https://github.com/shuijiao1/GUKO.git
+cd GUKO
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r telegram-bot/requirements.txt

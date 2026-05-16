@@ -29,15 +29,15 @@ from telegram.error import BadRequest
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 DATA_DIR = Path(os.environ.get('DATA_DIR', '/data'))
-SERVERS_JSON = Path(os.environ.get('VPSPILOT_INV') or DATA_DIR / 'servers.json')
+SERVERS_JSON = Path(os.environ.get('GUKO_INV') or os.environ.get('VPSPILOT_INV') or DATA_DIR / 'servers.json')
 MEDIA_DIR = Path(os.environ.get('MEDIA_DIR', DATA_DIR / 'media'))
 TMP_DIR = Path(os.environ.get('TMP_DIR', DATA_DIR / 'tmp'))
 KEYS_DIR = Path(os.environ.get('KEYS_DIR', DATA_DIR / 'keys'))
 RENDER_CHECKPLACE = Path(os.environ.get('RENDER_CHECKPLACE', '/app/render_checkplace.py'))
 BGP_FETCH = Path(os.environ.get('BGP_FETCH', DATA_DIR / 'tools/bgp_fetch.py'))
 IPPURE_DOWNLOAD = Path(os.environ.get('IPPURE_DOWNLOAD', DATA_DIR / 'tools/download_ippure.js'))
-BGP_OUT_ROOT = Path(os.environ.get('BGP_OUT_ROOT', MEDIA_DIR / 'vpspilot-bgp'))
-IPPURE_TMP_ROOT = Path(os.environ.get('IPPURE_TMP_ROOT', TMP_DIR / 'vpspilot-ippure'))
+BGP_OUT_ROOT = Path(os.environ.get('BGP_OUT_ROOT', MEDIA_DIR / 'guko-bgp'))
+IPPURE_TMP_ROOT = Path(os.environ.get('IPPURE_TMP_ROOT', TMP_DIR / 'guko-ippure'))
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '').strip()
 ALLOWED_USERS = {x.strip() for x in os.environ.get('ALLOWED_USERS', '').split(',') if x.strip()}
 ADMIN_USERS = {x.strip() for x in os.environ.get('ADMIN_USERS', '').split(',') if x.strip()} or set(ALLOWED_USERS)
@@ -62,7 +62,7 @@ def startup_check():
     if not BOT_TOKEN or BOT_TOKEN in {'123456:replace-me', '123:abc', 'CHANGE_ME'}:
         problems.append('BOT_TOKEN is empty or still an example value')
     if not ALLOWED_USERS:
-        problems.append('ALLOWED_USERS is empty; VPSPilot requires whitelist mode')
+        problems.append('ALLOWED_USERS is empty; GUKO requires whitelist mode')
     if '*' in ALLOWED_USERS or '0' in ALLOWED_USERS:
         problems.append('ALLOWED_USERS contains unsafe wildcard-like value')
     for d in (DATA_DIR, MEDIA_DIR, TMP_DIR, KEYS_DIR):
@@ -103,7 +103,7 @@ async def guard(update: Update) -> bool:
     if update.callback_query:
         await update.callback_query.answer('无权限', show_alert=True)
     elif update.effective_message:
-        await update.effective_message.reply_text(f'无权限使用这个饺管家 bot。你的 ID：{uid}')
+        await update.effective_message.reply_text(f'无权限使用这个GUKO bot。你的 ID：{uid}')
     return False
 
 
@@ -126,9 +126,9 @@ def load_inventory() -> dict:
             'source': 'local',
             'defaults': {
                 'ssh': {
-                    'user': os.environ.get('VPSPILOT_DEFAULT_USER') or os.environ.get('JIAOOPS_DEFAULT_USER', 'root'),
-                    'port': int(os.environ.get('VPSPILOT_DEFAULT_PORT') or os.environ.get('JIAOOPS_DEFAULT_PORT', '22')),
-                    'key': os.environ.get('VPSPILOT_DEFAULT_KEY') or os.environ.get('JIAOOPS_DEFAULT_KEY', '/data/keys/id_ed25519'),
+                    'user': os.environ.get('GUKO_DEFAULT_USER') or os.environ.get('VPSPILOT_DEFAULT_USER') or os.environ.get('JIAOOPS_DEFAULT_USER', 'root'),
+                    'port': int(os.environ.get('GUKO_DEFAULT_PORT') or os.environ.get('VPSPILOT_DEFAULT_PORT') or os.environ.get('JIAOOPS_DEFAULT_PORT', '22')),
+                    'key': os.environ.get('GUKO_DEFAULT_KEY') or os.environ.get('VPSPILOT_DEFAULT_KEY') or os.environ.get('JIAOOPS_DEFAULT_KEY', '/data/keys/id_ed25519'),
                 }
             },
             'servers': [],
@@ -398,7 +398,7 @@ def geolocate_host(host, timeout=4):
         return None
     try:
         url = f'http://ip-api.com/json/{ip}?fields=status,countryCode,query,message'
-        req = urllib.request.Request(url, headers={'User-Agent': 'VPSPilot/1.0'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'GUKO/1.0'})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode(errors='replace'))
         if data.get('status') == 'success' and data.get('countryCode'):
@@ -765,7 +765,7 @@ def menu_text():
     d = load_inventory()
     servers = d.get('servers', [])
     return (
-        '<b>VPSPilot</b>\n'
+        '<b>GUKO</b>\n'
         f'服务器 <b>{len(servers)}</b> 台\n\n'
         '👇 点服务器打开操作面板。'
     )
@@ -1412,7 +1412,7 @@ async def render_checkplace_png(svg_url, out_png):
 async def send_report_images(bot, chat_id, report_links, prefix):
     if not report_links:
         return []
-    out_dir = Path('/tmp/vpspilot-results')
+    out_dir = Path('/tmp/guko-results')
     out_dir.mkdir(parents=True, exist_ok=True)
     sent = []
     for label, url in report_links:
@@ -1434,7 +1434,7 @@ async def run_ip_quality_task(bot, chat_id, s, jid):
         if not url:
             await bot.send_message(chat_id, f"❌ {safe(s.get('name'))} IP质量没拿到报告链接。\n<pre>{safe(trim_log(out))}</pre>", parse_mode=ParseMode.HTML)
             return
-        out_dir = Path('/tmp/vpspilot-results')
+        out_dir = Path('/tmp/guko-results')
         out_dir.mkdir(parents=True, exist_ok=True)
         png = out_dir / f"ipq-{server_id(s)}-{int(time.time())}.png"
         try:
@@ -1637,7 +1637,7 @@ def gb5_result_image(s, scores, out_png):
     if scores.get('url'):
         d.text((110, 1125), fit(d, scores['url'], font_small, 850), fill=blue, font=font_small)
 
-    d.text((70, 1255), 'Generated by VPSPilot · Geekbench 5', fill=muted, font=font_small)
+    d.text((70, 1255), 'Generated by GUKO · Geekbench 5', fill=muted, font=font_small)
     im.save(out_png, quality=95)
     return out_png
 
@@ -2155,7 +2155,7 @@ async def run_nexttrace_task(bot, chat_id, s, jid, target='1.1.1.1'):
         )
         code, out = await run_subprocess(ssh_args(s, remote, tty=False), timeout=300, env=ssh_env_for(s))
         JOBS[jid] = {'status': 'done' if code == 0 else 'failed', 'log': out, 'server': s.get('name'), 'kind': 'nexttrace', 'target': target}
-        out_dir = Path('/tmp/vpspilot-results')
+        out_dir = Path('/tmp/guko-results')
         out_dir.mkdir(parents=True, exist_ok=True)
         png = out_dir / f"nexttrace-{server_id(s)}-{safe_target(target)}-{int(time.time())}.jpg"
         try:
@@ -2196,7 +2196,7 @@ async def run_stream_task(bot, chat_id, s, jid):
         )
         code, out = await run_subprocess(ssh_args(s, remote, tty=False), timeout=1800, env=ssh_env_for(s))
         JOBS[jid] = {'status': 'done' if code == 0 else 'failed', 'log': out, 'server': s.get('name'), 'kind': 'stream', 'proto': proto_text, 'region': region_label}
-        out_dir = Path('/tmp/vpspilot-results')
+        out_dir = Path('/tmp/guko-results')
         out_dir.mkdir(parents=True, exist_ok=True)
         png = out_dir / f"stream-{server_id(s)}-{int(time.time())}.jpg"
         try:
@@ -2328,11 +2328,11 @@ async def export_config_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await admin_guard(update): return
     data = redact_inventory(load_inventory())
     text = json.dumps(data, ensure_ascii=False, indent=2) + '\n'
-    path = TMP_DIR / f'vpspilot-export-redacted-{int(time.time())}.json'
+    path = TMP_DIR / f'guko-export-redacted-{int(time.time())}.json'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     with path.open('rb') as f:
-        await update.message.reply_document(document=f, filename='vpspilot-servers-redacted.json', caption='已导出脱敏配置（密码已隐藏）。')
+        await update.message.reply_document(document=f, filename='guko-servers-redacted.json', caption='已导出脱敏配置（密码已隐藏）。')
 
 
 async def testall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2544,7 +2544,7 @@ async def fallback_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def post_init(app: Application):
     commands = [
-        BotCommand('start', '打开 VPSPilot 面板'),
+        BotCommand('start', '打开 GUKO 面板'),
         BotCommand('list', '服务器列表'),
         BotCommand('status', '总览状态'),
         BotCommand('addserver', '添加/批量导入服务器'),
@@ -2608,7 +2608,7 @@ async def run_remote(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     target, cmd = context.args[0], context.args[1:]
     msg = await update.message.reply_text(f'执行中：{target}')
-    code, out = await run_cmd(['python', '/app/vpspilot.py', 'run', target, *cmd], timeout=120)
+    code, out = await run_cmd(['python', '/app/guko.py', 'run', target, *cmd], timeout=120)
     await msg.edit_text(f'<pre>{safe((out or f"退出码 {code}")[-3500:])}</pre>', parse_mode=ParseMode.HTML)
 
 
@@ -2759,7 +2759,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             '⚠️ 确认删除这台服务器？\n\n'
             f'<b>{safe(s.get("name"))}</b>\n'
             f'<code>{safe(cfg.get("user"))}@{safe(cfg.get("host"))}:{safe(cfg.get("port"))}</code>\n\n'
-            '只会从 VPSPilot 配置删除，不会动远端机器。',
+            '只会从 GUKO 配置删除，不会动远端机器。',
             parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton('✅ 确认删除', callback_data=f'delconfirm:{sid}')],
@@ -2985,7 +2985,7 @@ def main():
     app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_panel))
     app.add_error_handler(error_handler)
-    print('vpspilot telegram bot started', flush=True)
+    print('guko telegram bot started', flush=True)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

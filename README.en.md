@@ -1,6 +1,6 @@
-# VPSPilot
+# GUKO
 
-[![Docker Image](https://img.shields.io/badge/ghcr.io-vpspilot-blue?logo=docker)](https://github.com/shuijiao1/VPSPilot/pkgs/container/vpspilot)
+[![Docker Image](https://img.shields.io/badge/ghcr.io-guko-blue?logo=docker)](https://github.com/shuijiao1/GUKO/pkgs/container/guko)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [中文](README.md) | **English**
@@ -36,23 +36,23 @@ Two deployment methods are available. **Docker Compose is recommended**.
 ### Method 1: Docker Compose (recommended, no git clone)
 
 ```bash
-mkdir -p vpspilot/keys vpspilot/media vpspilot/tmp
-cd vpspilot
+mkdir -p guko/keys guko/media guko/tmp
+cd guko
 
-curl -Lo docker-compose.yml https://raw.githubusercontent.com/shuijiao1/VPSPilot/main/docker-compose.example.yml
+curl -Lo docker-compose.yml https://raw.githubusercontent.com/shuijiao1/GUKO/main/docker-compose.example.yml
 
 cat > .env <<'EOF'
 BOT_TOKEN=replace-me
 ALLOWED_USERS=123456789
 ADMIN_USERS=123456789
 DATA_DIR=/data
-VPSPILOT_INV=/data/servers.json
+GUKO_INV=/data/servers.json
 MEDIA_DIR=/data/media
 TMP_DIR=/data/tmp
 KEYS_DIR=/data/keys
-VPSPILOT_DEFAULT_USER=root
-VPSPILOT_DEFAULT_PORT=22
-VPSPILOT_DEFAULT_KEY=/data/keys/id_ed25519
+GUKO_DEFAULT_USER=root
+GUKO_DEFAULT_PORT=22
+GUKO_DEFAULT_KEY=/data/keys/id_ed25519
 ENABLE_REMOTE_RUN=false
 ENABLE_BGP=true
 ENABLE_IPPURE=true
@@ -96,21 +96,21 @@ After startup, send `/addserver` to the Bot to add your first server.
 ### Method 2: Source build (development)
 
 ```bash
-git clone https://github.com/shuijiao1/VPSPilot.git
-cd VPSPilot
+git clone https://github.com/shuijiao1/GUKO.git
+cd GUKO
 cp .env.example .env
 cp servers.example.json servers.json
 mkdir -p keys media tmp
 nano .env
-docker build -f telegram-bot/Dockerfile -t vpspilot:local .
-docker run -d --name vpspilot-bot --restart unless-stopped \
+docker build -f telegram-bot/Dockerfile -t guko:local .
+docker run -d --name guko-bot --restart unless-stopped \
   --env-file .env \
   -v ./servers.json:/data/servers.json \
   -v ./keys:/data/keys \
   -v ./media:/data/media \
   -v ./tmp:/data/tmp \
-  vpspilot:local
-docker logs -f vpspilot-bot
+  guko:local
+docker logs -f guko-bot
 ```
 
 ---
@@ -125,7 +125,7 @@ Send this to the Bot in a private chat:
 /start
 ```
 
-The Bot will show the VPSPilot dashboard. Tap a server to view details.
+The Bot will show the GUKO dashboard. Tap a server to view details.
 
 ### Add servers
 
@@ -152,7 +152,7 @@ jp-01 203.0.113.20:2222 debian
 
 Then the Bot will ask for the login method:
 
-- **Use default key / config**: Use `VPSPILOT_DEFAULT_KEY` or `defaults.ssh.key` from `servers.json`.
+- **Use default key / config**: Use `GUKO_DEFAULT_KEY` or `defaults.ssh.key` from `servers.json`.
 - **Use existing key path**: Send a path such as `/data/keys/id_ed25519`.
 - **Upload / paste a new private key**: Send SSH private key text, or upload a private key file. The Bot saves it to `/data/keys/`, sets permission to `600`, and tries an SSH login test.
 - **Use password**: Send SSH password. The Bot saves the config and tries a login test.
@@ -201,7 +201,7 @@ jp-01 203.0.113.20 2222 debian password:your-password
 
 ### Commands
 
-- `/start` — Open VPSPilot dashboard
+- `/start` — Open GUKO dashboard
 - `/list` — Show server list
 - `/status` — Show overview status
 - `/addserver` — Add / batch import servers
@@ -226,13 +226,13 @@ BOT_TOKEN=replace-me
 ALLOWED_USERS=123456789
 ADMIN_USERS=123456789
 DATA_DIR=/data
-VPSPILOT_INV=/data/servers.json
+GUKO_INV=/data/servers.json
 MEDIA_DIR=/data/media
 TMP_DIR=/data/tmp
 KEYS_DIR=/data/keys
-VPSPILOT_DEFAULT_USER=root
-VPSPILOT_DEFAULT_PORT=22
-VPSPILOT_DEFAULT_KEY=/data/keys/id_ed25519
+GUKO_DEFAULT_USER=root
+GUKO_DEFAULT_PORT=22
+GUKO_DEFAULT_KEY=/data/keys/id_ed25519
 ENABLE_REMOTE_RUN=false
 ENABLE_BGP=true
 ENABLE_IPPURE=true
@@ -250,13 +250,13 @@ ALLOW_INSECURE_STARTUP=false
 | `ALLOWED_USERS` | Yes | - | Allowed Telegram numeric user IDs, comma-separated |
 | `ADMIN_USERS` | No | `ALLOWED_USERS` | Admin IDs; can add / delete servers and use high-risk features |
 | `DATA_DIR` | No | `/data` | Container data directory |
-| `VPSPILOT_INV` | No | `/data/servers.json` | Server inventory path |
+| `GUKO_INV` | No | `/data/servers.json` | Server inventory path |
 | `MEDIA_DIR` | No | `/data/media` | Image and report output directory |
 | `TMP_DIR` | No | `/data/tmp` | Temporary directory |
 | `KEYS_DIR` | No | `/data/keys` | SSH private key storage directory |
-| `VPSPILOT_DEFAULT_USER` | No | `root` | Default SSH user |
-| `VPSPILOT_DEFAULT_PORT` | No | `22` | Default SSH port |
-| `VPSPILOT_DEFAULT_KEY` | No | `/data/keys/id_ed25519` | Default SSH private key path |
+| `GUKO_DEFAULT_USER` | No | `root` | Default SSH user |
+| `GUKO_DEFAULT_PORT` | No | `22` | Default SSH port |
+| `GUKO_DEFAULT_KEY` | No | `/data/keys/id_ed25519` | Default SSH private key path |
 | `ENABLE_REMOTE_RUN` | No | `false` | Enable `/run` remote command execution |
 | `ENABLE_BGP` | No | `true` | Enable BGP image feature |
 | `ENABLE_IPPURE` | No | `true` | Enable IPPure image feature |
@@ -278,7 +278,7 @@ ALLOW_INSECURE_STARTUP=false
 Persistent data lives in the installation directory:
 
 ```text
-VPSPilot/
+GUKO/
 ├── docker-compose.example.yml
 ├── .env
 ├── servers.json       # private server inventory
@@ -370,8 +370,8 @@ Legacy format is still supported:
 Test after batch import:
 
 ```bash
-./vpspilot.py list
-./vpspilot.py run hk-01 'hostname'
+./guko.py list
+./guko.py run hk-01 'hostname'
 ```
 
 You can also export sanitized config from the Bot:
@@ -394,8 +394,8 @@ You can also export sanitized config from the Bot:
 ## 🧩 Source run (development)
 
 ```bash
-git clone https://github.com/shuijiao1/VPSPilot.git
-cd VPSPilot
+git clone https://github.com/shuijiao1/GUKO.git
+cd GUKO
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r telegram-bot/requirements.txt

@@ -13,7 +13,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Python compile
-        run: python -m py_compile auth.py vpspilot.py jiaoops.py telegram-bot/bot.py optional/update_from_nezha.py
+        run: python -m py_compile auth.py guko.py jiaoops.py telegram-bot/bot.py optional/update_from_nezha.py
       - name: Secret grep
         run: |
           ! grep -R "BEGIN .*PRIVATE KEY" -n . --exclude-dir=.git

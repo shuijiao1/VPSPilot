@@ -5,7 +5,7 @@ from pathlib import Path
 from auth import resolve_ssh, ssh_args, ssh_display
 
 ROOT = Path(__file__).resolve().parent
-INV = Path(os.environ.get('VPSPILOT_INV', ROOT / 'servers.json'))
+INV = Path(os.environ.get('GUKO_INV') or os.environ.get('VPSPILOT_INV') or ROOT / 'servers.json')
 
 
 def load_inventory():
@@ -37,7 +37,7 @@ systemctl is-active nezha-agent >/dev/null 2>&1 && echo 'nezha=active' || echo '
 
 
 def main():
-    p = argparse.ArgumentParser(prog='vpspilot', description='饺管家 / VPSPilot server manager')
+    p = argparse.ArgumentParser(prog='guko', description='GUKO server manager')
     sub = p.add_subparsers(dest='cmd', required=True)
     sub.add_parser('list')
     sub.add_parser('health')
@@ -76,8 +76,8 @@ def main():
         if not args.command:
             sys.exit('missing command')
         # Support both styles:
-        #   vpspilot.py run host 'systemctl status nginx --no-pager'
-        #   vpspilot.py run host systemctl status nginx --no-pager
+        #   guko.py run host 'systemctl status nginx --no-pager'
+        #   guko.py run host systemctl status nginx --no-pager
         remote = args.command[0] if len(args.command) == 1 else ' '.join(shlex.quote(x) for x in args.command)
         subprocess.run(ssh_args(target, remote, inv=inv), check=False, env=ssh_env_for(target, inv))
 

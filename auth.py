@@ -3,9 +3,9 @@ import shlex
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_KEY = os.environ.get('VPSPILOT_DEFAULT_KEY') or os.environ.get('JIAOOPS_DEFAULT_KEY', '/data/keys/id_ed25519')
-DEFAULT_PORT = int(os.environ.get('VPSPILOT_DEFAULT_PORT') or os.environ.get('JIAOOPS_DEFAULT_PORT', '22'))
-DEFAULT_USER = os.environ.get('VPSPILOT_DEFAULT_USER') or os.environ.get('JIAOOPS_DEFAULT_USER', 'root')
+DEFAULT_KEY = os.environ.get('GUKO_DEFAULT_KEY') or os.environ.get('VPSPILOT_DEFAULT_KEY') or os.environ.get('JIAOOPS_DEFAULT_KEY', '/data/keys/id_ed25519')
+DEFAULT_PORT = int(os.environ.get('GUKO_DEFAULT_PORT') or os.environ.get('VPSPILOT_DEFAULT_PORT') or os.environ.get('JIAOOPS_DEFAULT_PORT', '22'))
+DEFAULT_USER = os.environ.get('GUKO_DEFAULT_USER') or os.environ.get('VPSPILOT_DEFAULT_USER') or os.environ.get('JIAOOPS_DEFAULT_USER', 'root')
 
 
 def inventory_defaults(inv: dict | None = None) -> dict:

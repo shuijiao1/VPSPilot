@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 RUN npm install -g playwright@1.59.1 \
  && PLAYWRIGHT_BROWSERS_PATH=/ms-playwright npx playwright install --with-deps chromium
 ENV NODE_PATH=/usr/lib/node_modules PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-COPY auth.py vpspilot.py jiaoops.py /app/
+COPY auth.py guko.py jiaoops.py /app/
 RUN mkdir -p /data/keys /data/media /data/tmp
 COPY telegram-bot/bot.py telegram-bot/render_checkplace.py /app/
 COPY telegram-bot/tools/ /app/tools/

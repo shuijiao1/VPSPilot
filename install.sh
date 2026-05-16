@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 mkdir -p keys media tmp
 chmod 700 keys || true
 cat <<'MSG'
-VPSPilot initialized.
+GUKO initialized.
 
 Next steps:
 1. Create your own Telegram bot with BotFather.

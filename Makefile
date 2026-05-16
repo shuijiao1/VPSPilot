@@ -22,6 +22,6 @@ logs:
 	docker compose -f docker-compose.example.yml logs -f --tail=200
 
 check:
-	python3 -m py_compile auth.py vpspilot.py jiaoops.py telegram-bot/bot.py optional/update_from_nezha.py
+	python3 -m py_compile auth.py guko.py jiaoops.py telegram-bot/bot.py optional/update_from_nezha.py
 	@! grep -R "BOT_TOKEN=.*[0-9][0-9][0-9].*:" -n . --exclude='.env.example' --exclude-dir='.git' || (echo "Possible token leak" && exit 1)
 	@! grep -R "BEGIN .*PRIVATE KEY" -n . --exclude-dir='.git' || (echo "Private key leak" && exit 1)

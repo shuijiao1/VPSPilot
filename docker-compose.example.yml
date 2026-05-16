@@ -1,7 +1,7 @@
 services:
-  vpspilot-bot:
-    image: ghcr.io/shuijiao1/vpspilot:latest
-    container_name: vpspilot-bot
+  guko-bot:
+    image: ghcr.io/shuijiao1/guko:latest
+    container_name: guko-bot
     restart: unless-stopped
     env_file: .env
     volumes:

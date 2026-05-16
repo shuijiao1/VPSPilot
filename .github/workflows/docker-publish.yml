@@ -17,8 +17,8 @@ jobs:
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Build image
-        run: docker build -f telegram-bot/Dockerfile -t ghcr.io/${{ github.repository_owner }}/vpspilot:latest -t ghcr.io/${{ github.repository_owner }}/vpspilot:${{ github.sha }} .
+        run: docker build -f telegram-bot/Dockerfile -t ghcr.io/${{ github.repository_owner }}/guko:latest -t ghcr.io/${{ github.repository_owner }}/guko:${{ github.sha }} .
       - name: Push image
         run: |
-          docker push ghcr.io/${{ github.repository_owner }}/vpspilot:latest
-          docker push ghcr.io/${{ github.repository_owner }}/vpspilot:${{ github.sha }}
+          docker push ghcr.io/${{ github.repository_owner }}/guko:latest
+          docker push ghcr.io/${{ github.repository_owner }}/guko:${{ github.sha }}
