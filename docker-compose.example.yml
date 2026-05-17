@@ -8,4 +8,6 @@ services:
       - ./servers.json:/data/servers.json
       - ./keys:/data/keys
       - ./media:/data/media
+      - ./results:/data/results
+      - ./history.json:/data/history.json
       - ./tmp:/data/tmp

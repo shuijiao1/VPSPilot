@@ -16,7 +16,7 @@ import shlex
 import socket
 from pathlib import Path
 from typing import Iterable
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from urllib.parse import urlparse
 import urllib.error
 from PIL import Image, ImageDraw, ImageFont
@@ -52,9 +52,12 @@ GB5_VERSION = '5.5.1'
 GB5_URL = f'https://cdn.geekbench.com/Geekbench-{GB5_VERSION}-Linux.tar.gz'
 JOBS = {}
 RUNNING = set()
+QUEUES = {}
+QUEUE_WORKERS = {}
 PENDING_NEXTTRACE = {}
 ADD_SESSIONS = {}
 HISTORY_JSON = Path(os.environ.get('HISTORY_JSON', DATA_DIR / 'history.json'))
+RESULTS_DIR = Path(os.environ.get('RESULTS_DIR', DATA_DIR / 'results'))
 # Each server/test kind only keeps the latest finished result; this stays intentionally small.
 HISTORY_LIMIT = int(os.environ.get('HISTORY_LIMIT', '500'))
 
@@ -67,7 +70,7 @@ def startup_check():
         problems.append('ALLOWED_USERS is empty; GUKO requires whitelist mode')
     if '*' in ALLOWED_USERS or '0' in ALLOWED_USERS:
         problems.append('ALLOWED_USERS contains unsafe wildcard-like value')
-    for d in (DATA_DIR, MEDIA_DIR, TMP_DIR, KEYS_DIR):
+    for d in (DATA_DIR, MEDIA_DIR, TMP_DIR, KEYS_DIR, RESULTS_DIR):
         d.mkdir(parents=True, exist_ok=True)
     HISTORY_JSON.parent.mkdir(parents=True, exist_ok=True)
     if SERVERS_JSON.exists():
@@ -440,6 +443,13 @@ async def send_running_notice(bot, chat_id, s, task):
     await bot.send_message(chat_id, running_text(s, task), parse_mode=ParseMode.HTML)
 
 
+async def bot_queue_notice(bot, chat_id, s, task, pos):
+    if pos <= 1:
+        await bot.send_message(chat_id, running_text(s, task), parse_mode=ParseMode.HTML)
+    else:
+        await bot.send_message(chat_id, f'已加入队列：{safe(s.get("name"))} {task}（第 {pos} 个）', parse_mode=ParseMode.HTML)
+
+
 def is_valid_hostname(value):
     text = str(value or '').strip()
     if not text or len(text) > 253 or ' ' in text:
@@ -600,6 +610,11 @@ def tool_enabled(name):
     return val in ('1', 'true', 'yes', 'on')
 
 
+
+def button_rows(buttons, per_row=2):
+    return [buttons[i:i+per_row] for i in range(0, len(buttons), per_row)]
+
+
 def server_markup(s):
     sid = server_id(s)
     host = s.get('host') or ''
@@ -608,39 +623,33 @@ def server_markup(s):
         rows.append([InlineKeyboardButton('📋 复制 IPv4', copy_text=CopyTextButton(host))])
     if s.get('ipv6'):
         rows.append([InlineKeyboardButton('📋 复制 IPv6', copy_text=CopyTextButton(s.get('ipv6')))])
-    test_row = []
+
+    test_buttons = []
     if tool_enabled('ipq'):
-        test_row.append(InlineKeyboardButton('🧪 IP质量', callback_data=f'ipq:{sid}'))
+        test_buttons.append(InlineKeyboardButton('🧪 IP质量', callback_data=f'ipq:{sid}'))
     if tool_enabled('nq'):
-        test_row.append(InlineKeyboardButton('📊 NodeQuality', callback_data=f'nqask:{sid}'))
-    if test_row:
-        rows.append(test_row)
-    bench_row = []
+        test_buttons.append(InlineKeyboardButton('📊 NodeQuality', callback_data=f'nqask:{sid}'))
     if tool_enabled('gb5'):
-        bench_row.append(InlineKeyboardButton('🏁 GB5', callback_data=f'gb5:{sid}'))
+        test_buttons.append(InlineKeyboardButton('🏁 GB5', callback_data=f'gb5:{sid}'))
     if tool_enabled('stream'):
-        bench_row.append(InlineKeyboardButton('🎬 流媒体检测', callback_data=f'stream:{sid}'))
-    if bench_row:
-        rows.append(bench_row)
-    image_row = []
+        test_buttons.append(InlineKeyboardButton('🎬 流媒体', callback_data=f'stream:{sid}'))
     if tool_enabled('bgp'):
-        image_row.append(InlineKeyboardButton('🧭 BGP图', callback_data=f'bgp:{sid}'))
+        test_buttons.append(InlineKeyboardButton('🧭 BGP图', callback_data=f'bgp:{sid}'))
     if tool_enabled('ippure'):
-        image_row.append(InlineKeyboardButton('🧼 IPPure', callback_data=f'ippure:{sid}'))
-    if image_row:
-        rows.append(image_row)
-    ops_row = [
+        test_buttons.append(InlineKeyboardButton('🧼 IPPure', callback_data=f'ippure:{sid}'))
+    rows.extend(button_rows(test_buttons, 2))
+
+    ops_buttons = [
         InlineKeyboardButton('📋 当前任务', callback_data=f'jobsrv:{sid}'),
         InlineKeyboardButton('📜 历史记录', callback_data=f'hist:{sid}'),
         InlineKeyboardButton('🧪 测试SSH', callback_data=f'testssh:{sid}'),
     ]
     if tool_enabled('nexttrace'):
-        ops_row.append(InlineKeyboardButton('🛣 NextTrace', callback_data=f'ntask:{sid}'))
-    rows.append(ops_row)
-    rows.append([
-        InlineKeyboardButton('✏️ 编辑', callback_data=f'edit:{sid}'),
-        InlineKeyboardButton('🗑 删除', callback_data=f'delask:{sid}'),
-        InlineKeyboardButton('↩️ 返回列表', callback_data='act:list'),
+        ops_buttons.append(InlineKeyboardButton('🛣 NextTrace', callback_data=f'ntask:{sid}'))
+    rows.extend(button_rows(ops_buttons, 2))
+    rows.extend([
+        [InlineKeyboardButton('✏️ 编辑', callback_data=f'edit:{sid}'), InlineKeyboardButton('🗑 删除', callback_data=f'delask:{sid}')],
+        [InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')],
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -987,11 +996,67 @@ KIND_NAME = {
     'ipq': 'IP质量', 'nq': 'NodeQuality', 'gb5': 'GB5', 'stream': '流媒体检测',
     'nexttrace': 'NextTrace', 'bgp': 'BGP图', 'ippure': 'IPPure图',
 }
-STATUS_ICON = {'queued': '🕒', 'running': '⏳', 'done': '✅', 'failed': '❌'}
+STATUS_ICON = {'queued': '🟡', 'running': '🟢', 'done': '✅', 'failed': '🔴'}
 
 
 def iso_now():
     return datetime.now().astimezone().isoformat(timespec='seconds')
+
+
+def kind_result_dir(s, kind):
+    return RESULTS_DIR / str(server_id(s)) / str(kind)
+
+
+def latest_result_files(s, kind):
+    root = kind_result_dir(s, kind)
+    if not root.exists():
+        return []
+    files = [p for p in root.iterdir() if p.is_file() and p.stat().st_size > 0]
+    return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def legacy_media_files(s, kind):
+    host = str(s.get('host') or '').strip()
+    files = []
+    if kind == 'bgp' and host:
+        for base in ('guko-bgp', 'vpspilot-bgp'):
+            files.extend([p for p in (MEDIA_DIR / base).glob(f'*/latest-{host}.png') if p.is_file() and p.stat().st_size > 0])
+    return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def all_result_files(s, kind):
+    files = latest_result_files(s, kind)
+    return files if files else legacy_media_files(s, kind)
+
+
+def persist_result_file(s, kind, src, suffix=None):
+    if not src:
+        return None
+    src = Path(src)
+    if not src.exists() or not src.is_file() or src.stat().st_size <= 0:
+        return None
+    root = kind_result_dir(s, kind)
+    root.mkdir(parents=True, exist_ok=True)
+    for old in root.iterdir():
+        if old.is_file():
+            try:
+                old.unlink()
+            except Exception:
+                pass
+    ext = suffix or src.suffix or '.bin'
+    dst = root / f'latest{ext}'
+    if src.resolve() != dst.resolve():
+        shutil.copy2(src, dst)
+    return str(dst)
+
+
+def latest_media_path(item):
+    paths = item.get('media_paths') or []
+    for x in paths:
+        p = Path(x)
+        if p.exists() and p.is_file() and p.stat().st_size > 0:
+            return p
+    return None
 
 
 def load_history():
@@ -1024,6 +1089,8 @@ def history_append(jid, job):
         'completed_at': job.get('completed_at'),
         'duration_sec': job.get('duration_sec'),
         'urls': extract_urls(job.get('log') or '')[:8],
+        'media_paths': job.get('media_paths') or ([] if not job.get('media_path') else [job.get('media_path')]),
+        'log_tail': trim_log(strip_ansi(job.get('log') or ''), 3500),
     }
     hist = [
         x for x in load_history()
@@ -1036,21 +1103,28 @@ def history_append(jid, job):
     save_history(hist)
 
 
+def create_job(s, kind, status='queued', **extra):
+    jid = job_id(kind, s)
+    now = iso_now()
+    JOBS[jid] = {
+        'status': status,
+        'server': s.get('name'),
+        'server_id': str(server_id(s)),
+        'kind': kind,
+        'created_at': now,
+        **extra,
+    }
+    if status == 'running':
+        JOBS[jid]['started_at'] = now
+    return jid
+
+
 def start_job(s, kind, **extra):
     key = (server_id(s), kind)
     if key in RUNNING:
         return None, key
     RUNNING.add(key)
-    jid = job_id(kind, s)
-    now = iso_now()
-    JOBS[jid] = {
-        'status': 'running',
-        'server': s.get('name'),
-        'server_id': str(server_id(s)),
-        'kind': kind,
-        'started_at': now,
-        **extra,
-    }
+    jid = create_job(s, kind, status='running', **extra)
     return jid, key
 
 
@@ -1060,7 +1134,7 @@ def finish_job(jid, key=None):
     job.setdefault('status', 'done')
     job['completed_at'] = now
     try:
-        st = datetime.fromisoformat(str(job.get('started_at')))
+        st = datetime.fromisoformat(str(job.get('started_at') or job.get('created_at')))
         en = datetime.fromisoformat(now)
         job['duration_sec'] = max(0, int((en - st).total_seconds()))
     except Exception:
@@ -1071,22 +1145,149 @@ def finish_job(jid, key=None):
         RUNNING.discard(key)
 
 
+def queue_key(s):
+    return str(server_id(s))
+
+
+def queue_position(s, jid):
+    q = QUEUES.get(queue_key(s)) or deque()
+    for i, entry in enumerate(q, start=1):
+        if entry.get('jid') == jid:
+            return i
+    return None
+
+
+async def queue_worker(s):
+    qk = queue_key(s)
+    q = QUEUES.setdefault(qk, deque())
+    while q:
+        entry = q[0]
+        jid = entry['jid']
+        job = JOBS.get(jid) or {}
+        job['status'] = 'running'
+        job['started_at'] = iso_now()
+        JOBS[jid] = job
+        RUNNING.add((server_id(s), job.get('kind')))
+        try:
+            await entry['runner'](*entry['args'])
+        finally:
+            q.popleft()
+    QUEUE_WORKERS.pop(qk, None)
+
+
+def enqueue_job(s, kind, runner, bot, chat_id, server, *runner_tail, **extra):
+    qk = queue_key(s)
+    jid = create_job(s, kind, status='queued', **extra)
+    entry = {'jid': jid, 'runner': runner, 'args': (bot, chat_id, server, jid, *runner_tail)}
+    q = QUEUES.setdefault(qk, deque())
+    q.append(entry)
+    if qk not in QUEUE_WORKERS or QUEUE_WORKERS[qk].done():
+        QUEUE_WORKERS[qk] = asyncio.create_task(queue_worker(s))
+    return jid, len(q)
+
+
 def server_history(s, limit=20):
     sid = str(server_id(s))
     name = str(s.get('name') or '')
     host = str(s.get('host') or '')
     out = []
+    seen = set()
     for item in load_history():
         if str(item.get('server_id') or '') == sid or str(item.get('server') or '') in (name, host, sid):
+            kind = item.get('kind')
+            if kind:
+                seen.add(kind)
             out.append(item)
+    scan_kinds = []
+    root = RESULTS_DIR / sid
+    if root.exists():
+        scan_kinds.extend([p.name for p in root.iterdir() if p.is_dir()])
+    scan_kinds.extend(['bgp'])
+    for kind in sorted(set(scan_kinds)):
+        if kind in seen:
+            continue
+        files = all_result_files(s, kind)
+        if not files:
+            continue
+        newest = files[0]
+        out.append({
+            'job_id': f'file-{sid}-{kind}',
+            'server': s.get('name'),
+            'server_id': sid,
+            'kind': kind,
+            'status': 'done',
+            'completed_at': datetime.fromtimestamp(newest.stat().st_mtime).astimezone().isoformat(timespec='seconds'),
+            'media_paths': [str(p) for p in files],
+            'log_tail': str(newest),
+        })
     return out[-limit:]
+
+
+def history_item_for(s, kind):
+    for item in reversed(server_history(s, 50)):
+        if item.get('kind') == kind:
+            return item
+    return None
+
+
+def history_markup(s):
+    sid = server_id(s)
+    items = list(reversed(server_history(s, 50)))
+    buttons = []
+    seen = set()
+    for item in items:
+        kind = item.get('kind')
+        if not kind or kind in seen:
+            continue
+        seen.add(kind)
+        icon = STATUS_ICON.get(item.get('status'), '•')
+        label = f'{icon} {KIND_NAME.get(kind, kind)}'
+        buttons.append(InlineKeyboardButton(label, callback_data=f'histd:{sid}:{kind}'))
+    rows = button_rows(buttons, 2)
+    rows.append([InlineKeyboardButton('🔄 刷新历史', callback_data=f'hist:{sid}')])
+    rows.append([InlineKeyboardButton('↩️ 返回操作面板', callback_data=f'srv:{sid}')])
+    return InlineKeyboardMarkup(rows)
+
+
+def history_detail_text(s, kind):
+    item = history_item_for(s, kind)
+    if not item:
+        return f'📜 <b>{safe(s.get("name"))}</b> 暂无 {safe(KIND_NAME.get(kind, kind))} 历史。'
+    icon = STATUS_ICON.get(item.get('status'), '•')
+    lines = [
+        f'{icon} <b>{safe(s.get("name"))} · {safe(KIND_NAME.get(kind, kind))}</b>',
+        f'状态：<b>{safe(item.get("status") or "-")}</b>',
+    ]
+    when = item.get('completed_at') or item.get('started_at')
+    if when:
+        lines.append(f'时间：<code>{safe(when)}</code>')
+    if item.get('duration_sec') is not None:
+        lines.append(f'耗时：<code>{safe(item.get("duration_sec"))}s</code>')
+    params = []
+    for label, key in [('目标', 'target'), ('选择', 'selected'), ('IP模式', 'ip_mode'), ('地区', 'region')]:
+        if item.get(key):
+            params.append(f'{label}：{item.get(key)}')
+    if params:
+        lines.append('参数：' + safe('；'.join(params)))
+    urls = item.get('urls') or []
+    if urls:
+        lines.append('\n链接：\n' + '\n'.join(safe(u) for u in urls[:8]))
+    media = latest_media_path(item)
+    if media:
+        lines.append('\n图片：点击后会重新发送最近一次结果图。')
+    log_tail = (item.get('log_tail') or '').strip()
+    if log_tail and not media:
+        lines.append('\n详情：\n<pre>' + safe(log_tail[-3200:]) + '</pre>')
+    else:
+        lines.append('\n详情：暂无可展示内容。')
+    return '\n'.join(lines)
 
 
 def history_text(s):
     items = server_history(s, 20)
     if not items:
         return f'📜 <b>{safe(s.get("name"))}</b> 暂无测试历史。'
-    lines = [f'📜 <b>{safe(s.get("name"))}</b> 最近一次测试结果']
+    lines = [f'📜 <b>{safe(s.get("name"))}</b> 最近一次测试结果', '点下面的功能按钮可以查看具体内容。']
     for item in reversed(items):
         icon = STATUS_ICON.get(item.get('status'), '•')
         kind = KIND_NAME.get(item.get('kind'), item.get('kind') or '-')
@@ -1110,10 +1311,38 @@ def server_jobs(s):
     host = str(s.get('host') or '')
     found = []
     for jid, j in JOBS.items():
+        if (j.get('status') or '') not in ('running', 'queued'):
+            continue
         j_server = str(j.get('server') or '')
         if f'-{sid}-' in str(jid) or j_server in (name, host, sid):
             found.append((jid, j))
+    found.sort(key=lambda kv: kv[1].get('created_at') or kv[1].get('started_at') or kv[0])
     return found
+
+
+def compact_job_line(s, jid, j):
+    status = j.get('status') or '-'
+    icon = STATUS_ICON.get(status, '•')
+    kind = KIND_NAME.get(j.get('kind'), j.get('kind') or '-')
+    parts = [kind]
+    if j.get('selected'):
+        parts.append(str(j.get('selected')))
+    elif j.get('target'):
+        parts.append(str(j.get('target')))
+    elif j.get('region'):
+        parts.append(str(j.get('region')))
+    label = '·'.join(parts)
+    tail = status
+    extras = []
+    if j.get('ip_mode'):
+        extras.append(str(j.get('ip_mode')))
+    if status == 'queued':
+        pos = queue_position(s, jid)
+        if pos:
+            extras.append(f'队列第 {pos} 个')
+    if extras:
+        tail += f"（{'；'.join(extras)}）"
+    return f'{icon} {safe(label)} - {safe(tail)}'
 
 
 def job_status_text(s):
@@ -1122,21 +1351,7 @@ def job_status_text(s):
         return f'📋 <b>{safe(s.get("name"))}</b> 当前没有任务。'
     lines = [f'📋 <b>{safe(s.get("name"))}</b> 当前任务']
     for jid, j in jobs[-10:]:
-        status = j.get('status') or '-'
-        icon = STATUS_ICON.get(status, '•')
-        kind = KIND_NAME.get(j.get('kind'), j.get('kind') or '-')
-        dur = f" · {j.get('duration_sec')}s" if j.get('duration_sec') is not None else ''
-        extra = []
-        if j.get('target'):
-            extra.append(str(j.get('target')))
-        if j.get('selected'):
-            extra.append(str(j.get('selected')))
-        if j.get('ip_mode'):
-            extra.append(str(j.get('ip_mode')))
-        if j.get('region'):
-            extra.append(str(j.get('region')))
-        suffix = f" — {'；'.join(extra)}" if extra else ''
-        lines.append(f'{icon} <code>{safe(jid)}</code>\n   {safe(kind)} · {safe(status)}{safe(dur)}{safe(suffix)}')
+        lines.append(compact_job_line(s, jid, j))
     return '\n'.join(lines)
 
 
@@ -1462,7 +1677,8 @@ async def run_bgp_task(bot, chat_id, s, jid):
     try:
         ip = s.get('host')
         png = await generate_bgp_png(ip)
-        JOBS[jid].update({'status': 'done', 'log': str(png)})
+        saved = persist_result_file(s, 'bgp', png, '.png')
+        JOBS[jid].update({'status': 'done', 'log': str(png), 'media_path': saved})
         await send_png_and_cleanup(bot, chat_id, png)
     except Exception as e:
         JOBS[jid].update({'status': 'failed', 'log': repr(e)})
@@ -1476,7 +1692,8 @@ async def run_ippure_task(bot, chat_id, s, jid):
     try:
         ip = s.get('host')
         png = await generate_ippure_png(ip)
-        JOBS[jid].update({'status': 'done', 'log': str(png)})
+        saved = persist_result_file(s, 'ippure', png, '.png')
+        JOBS[jid].update({'status': 'done', 'log': str(png), 'media_path': saved})
         await send_png_and_cleanup(bot, chat_id, png, Path(png).parent)
     except Exception as e:
         JOBS[jid].update({'status': 'failed', 'log': repr(e)})
@@ -1556,7 +1773,10 @@ async def run_ip_quality_task(bot, chat_id, s, jid):
         png = out_dir / f"ipq-{server_id(s)}-{int(time.time())}.png"
         try:
             await render_checkplace_png(url, png)
-            await bot.send_photo(chat_id, photo=png.open('rb'))
+            saved = persist_result_file(s, 'ipq', png, '.png')
+            JOBS[jid].update({'media_path': saved})
+            with png.open('rb') as f:
+                await bot.send_photo(chat_id, photo=f)
             await bot.send_message(chat_id, f"✅ {safe(s.get('name'))} IP质量完成\n{safe(url)}\n\n{script_command_html('ipq')}", parse_mode=ParseMode.HTML)
         except Exception as e:
             await bot.send_message(chat_id, f"✅ {safe(s.get('name'))} IP质量报告：\n{safe(url)}\n\n{script_command_html('ipq')}\n\n转 PNG 失败：<code>{safe(e)}</code>", parse_mode=ParseMode.HTML)
@@ -1786,6 +2006,10 @@ async def run_gb5_task(bot, chat_id, s, jid):
         if code != 0 or not scores.get('url'):
             await bot.send_message(chat_id, f"❌ {safe(s.get('name'))} GB5 没拿到结果链接。\n<pre>{safe(trim_log(out))}</pre>", parse_mode=ParseMode.HTML)
             return
+        img = gb5_result_image(s, scores, RESULTS_DIR / str(server_id(s)) / 'gb5' / 'latest.jpg')
+        JOBS[jid].update({'media_path': str(img)})
+        with img.open('rb') as f:
+            await bot.send_photo(chat_id, photo=f)
         await bot.send_message(chat_id, f"✅ {safe(s.get('name'))} GB5 完成\n{safe(scores['url'])}", parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     except Exception as e:
         JOBS[jid].update({'status': 'failed', 'log': repr(e)})
@@ -2278,6 +2502,8 @@ async def run_nexttrace_task(bot, chat_id, s, jid, target='1.1.1.1'):
         except Exception:
             img = None
         if img:
+            saved = persist_result_file(s, 'nexttrace', img, '.jpg')
+            JOBS[jid].update({'media_path': saved})
             with img.open('rb') as f:
                 await bot.send_photo(chat_id, photo=f)
             await bot.send_message(chat_id, script_command_text('nexttrace', target=target))
@@ -2318,6 +2544,8 @@ async def run_stream_task(bot, chat_id, s, jid):
         except Exception:
             img = None
         if img:
+            saved = persist_result_file(s, 'stream', img, '.jpg')
+            JOBS[jid].update({'media_path': saved})
             with img.open('rb') as f:
                 await bot.send_photo(chat_id, photo=f)
             await bot.send_message(chat_id, script_command_text('stream', proto_arg=proto_arg, region_id=region_id))
@@ -2344,7 +2572,7 @@ async def run_nq_task(bot, chat_id, s, jid, mask=NQ_ALL_MASK, ip_mode='4'):
         ipv_arg = nq_remote_ipv_arg(s, ip_mode)
         remote = "export TERM=xterm-256color; cd /root && script=$(mktemp /root/nodequality.XXXXXX.sh); curl -sL https://run.NodeQuality.com > $script; sed -i 's#rm -rf \"${work_dir}\"/#: # rm -rf \"${work_dir}\"/#' $script; printf %b " + shlex.quote(answers) + " | bash $script " + ipv_arg
         code, out = await run_subprocess(ssh_args(s, remote, tty=False), timeout=7200, env=ssh_env_for(s))
-        JOBS[jid].update({'status': 'done' if code == 0 else 'failed', 'log': out, 'selected': selected_text, 'ip_mode': ip_text})
+        JOBS[jid].update({'status': 'running', 'log': out, 'selected': selected_text, 'ip_mode': ip_text})
         nq = nodequality_url(out)
         gb_urls = geekbench_urls(out)
         fixed_nq = None
@@ -2368,11 +2596,20 @@ async def run_nq_task(bot, chat_id, s, jid, mask=NQ_ALL_MASK, ip_mode='4'):
         image_error = ''
         if report_links:
             try:
-                await send_report_images(bot, chat_id, report_links, f"nq-{server_id(s)}")
+                sent = await send_report_images(bot, chat_id, report_links, f"nq-{server_id(s)}")
+                media_paths = []
+                for label, url, png in sent:
+                    saved = persist_result_file(s, 'nq', png, f'-{label}.png')
+                    if saved:
+                        media_paths.append(saved)
+                if media_paths:
+                    JOBS[jid].update({'media_paths': media_paths})
                 image_ok = True
             except Exception as e:
                 image_error = str(e)
-        msg = f"✅ {safe(s.get('name'))} NodeQuality 完成：{safe(selected_text)}；{safe(ip_text)}"
+        final_ok = bool(nq or report_links or image_ok)
+        JOBS[jid].update({'status': 'done' if final_ok else 'failed'})
+        msg = f"✅ {safe(s.get('name'))} NodeQuality 完成：{safe(selected_text)}；{safe(ip_text)}" if final_ok else f"❌ {safe(s.get('name'))} NodeQuality 失败：{safe(selected_text)}；{safe(ip_text)}"
         if nq:
             msg += f"\n\nNodeQuality:\n{safe(nq)}"
         if gb_urls:
@@ -2395,6 +2632,42 @@ async def run_nq_task(bot, chat_id, s, jid, mask=NQ_ALL_MASK, ip_mode='4'):
         await bot.send_message(chat_id, f"❌ {safe(s.get('name'))} NQ任务失败：<code>{safe(e)}</code>", parse_mode=ParseMode.HTML)
     finally:
         finish_job(jid, key)
+
+
+async def send_history_result(bot, chat_id, s, kind):
+    item = history_item_for(s, kind)
+    if not item:
+        await bot.send_message(chat_id, f'暂无 {safe(KIND_NAME.get(kind, kind))} 历史。', parse_mode=ParseMode.HTML)
+        return False
+    media_paths = []
+    for x in item.get('media_paths') or []:
+        p = Path(x)
+        if p.exists() and p.is_file() and p.stat().st_size > 0:
+            media_paths.append(p)
+    for media in media_paths:
+        with media.open('rb') as f:
+            await bot.send_photo(chat_id, photo=f)
+    if kind == 'nq':
+        urls = item.get('urls') or []
+        nq = next((u for u in urls if 'nodequality.com/r/' in u), None)
+        gb_urls = [u for u in urls if 'browser.geekbench.com/' in u]
+        report_urls = [u for u in urls if 'Report.Check.Place/' in u]
+        selected = item.get('selected') or '-'
+        ip_mode = item.get('ip_mode') or '-'
+        msg = f"✅ {safe(s.get('name'))} NodeQuality 完成：{safe(selected)}；{safe(ip_mode)}"
+        if nq:
+            msg += f"\n\nNodeQuality:\n{safe(nq)}"
+        if gb_urls:
+            msg += "\n\nGeekbench:\n" + "\n".join(safe(u) for u in gb_urls)
+        if not media_paths and report_urls:
+            msg += "\n\n分项报告：\n" + "\n".join(f"- {safe(u)}" for u in report_urls)
+        msg += f"\n\n{script_command_html('nq', selected=selected, ip_mode=ip_mode)}"
+        await bot.send_message(chat_id, msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        return True
+    if media_paths:
+        return True
+    await bot.send_message(chat_id, history_detail_text(s, kind), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    return True
 
 
 async def send_or_edit(update: Update, text, markup=None):
@@ -2495,7 +2768,7 @@ async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not s:
         await update.message.reply_text('没找到这台服务器。')
         return
-    await update.message.reply_text(history_text(s), parse_mode=ParseMode.HTML, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回操作面板', callback_data=f'srv:{server_id(s)}')]]))
+    await update.message.reply_text(history_text(s), parse_mode=ParseMode.HTML, disable_web_page_preview=True, reply_markup=history_markup(s))
 
 
 async def jobs_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2654,12 +2927,8 @@ async def fallback_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not target:
             await update.message.reply_text('没识别到 IP 或域名，已取消这次 NextTrace。')
             return
-        jid, key = start_job(s, 'nexttrace', target=target)
-        if not jid:
-            await update.message.reply_text('这台 NextTrace 已经在跑了。')
-            return
-        await send_running_notice(context.bot, chat_id, s, f'NextTrace {safe(target)}')
-        asyncio.create_task(run_nexttrace_task(context.bot, chat_id, s, jid, target))
+        jid, pos = enqueue_job(s, 'nexttrace', run_nexttrace_task, context.bot, chat_id, s, target, target=target)
+        await bot_queue_notice(context.bot, chat_id, s, f'NextTrace {safe(target)}', pos)
         return
     # 普通文本不再触发任何功能；只有点击 NextTrace 后的下一条 IP/域名才会被消费。
     return
@@ -2710,12 +2979,11 @@ async def nexttrace_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not (extract_ipv4(target) or normalize_domain(target)):
         await update.message.reply_text('目标需要是 IPv4 或域名。')
         return
-    jid, key = start_job(s, 'nexttrace', target=target)
-    if not jid:
-        await update.message.reply_text('这台 NextTrace 已经在跑了。')
-        return
-    asyncio.create_task(run_nexttrace_task(context.bot, update.effective_chat.id, s, jid, target))
-    await update.message.reply_text(f'🛣 已启动 {safe(s.get("name"))} NextTrace：{safe(target)}', parse_mode=ParseMode.HTML)
+    jid, pos = enqueue_job(s, 'nexttrace', run_nexttrace_task, context.bot, update.effective_chat.id, s, target, target=target)
+    if pos <= 1:
+        await update.message.reply_text(f'🛣 已启动 {safe(s.get("name"))} NextTrace：{safe(target)}', parse_mode=ParseMode.HTML)
+    else:
+        await update.message.reply_text(f'🕒 已加入队列：{safe(s.get("name"))} NextTrace：{safe(target)}（第 {pos} 个）', parse_mode=ParseMode.HTML)
 
 
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2849,11 +3117,37 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             history_text(s),
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton('🔄 刷新历史', callback_data=f'hist:{sid}')],
-                [InlineKeyboardButton('↩️ 返回操作面板', callback_data=f'srv:{sid}')],
-            ]),
+            reply_markup=history_markup(s),
         )
+    elif data.startswith('histd:'):
+        parts = data.split(':', 2)
+        sid = parts[1] if len(parts) > 1 else ''
+        kind = parts[2] if len(parts) > 2 else ''
+        s = find_server_by_id(sid)
+        if not s:
+            await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
+            return
+        item = history_item_for(s, kind)
+        if item and (latest_media_path(item) or kind == 'nq'):
+            await send_history_result(context.bot, q.message.chat_id, s, kind)
+            await q.edit_message_text(
+                f'已重新发送 <b>{safe(KIND_NAME.get(kind, kind))}</b> 最近一次完整结果。',
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton('↩️ 返回历史记录', callback_data=f'hist:{sid}')],
+                    [InlineKeyboardButton('↩️ 返回操作面板', callback_data=f'srv:{sid}')],
+                ]),
+            )
+        else:
+            await q.edit_message_text(
+                history_detail_text(s, kind),
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton('↩️ 返回历史记录', callback_data=f'hist:{sid}')],
+                    [InlineKeyboardButton('↩️ 返回操作面板', callback_data=f'srv:{sid}')],
+                ]),
+            )
     elif data.startswith('testssh:'):
         if not await admin_guard(update): return
         sid = data.split(':', 1)[1]
@@ -2901,24 +3195,16 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not s:
             await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
             return
-        jid, key = start_job(s, 'ipq')
-        if not jid:
-            await q.answer('这台 IP质量已经在跑了', show_alert=True)
-            return
-        await send_running_notice(context.bot, q.message.chat_id, s, 'IP质量任务')
-        asyncio.create_task(run_ip_quality_task(context.bot, q.message.chat_id, s, jid))
+        jid, pos = enqueue_job(s, 'ipq', run_ip_quality_task, context.bot, q.message.chat_id, s)
+        await bot_queue_notice(context.bot, q.message.chat_id, s, 'IP质量任务', pos)
     elif data.startswith('gb5:'):
         sid = data.split(':', 1)[1]
         s = find_server_by_id(sid)
         if not s:
             await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
             return
-        jid, key = start_job(s, 'gb5')
-        if not jid:
-            await q.answer('这台 GB5 已经在跑了', show_alert=True)
-            return
-        await send_running_notice(context.bot, q.message.chat_id, s, 'GB5')
-        asyncio.create_task(run_gb5_task(context.bot, q.message.chat_id, s, jid))
+        jid, pos = enqueue_job(s, 'gb5', run_gb5_task, context.bot, q.message.chat_id, s)
+        await bot_queue_notice(context.bot, q.message.chat_id, s, 'GB5', pos)
     elif data.startswith('stream:') or data.startswith('streamrun:'):
         sid = data.split(':', 1)[1]
         s = find_server_by_id(sid)
@@ -2926,12 +3212,8 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
             return
         region_id, region_label = stream_region_for_server(s)
-        jid, key = start_job(s, 'stream', region=region_label)
-        if not jid:
-            await q.answer('这台流媒体检测已经在跑了', show_alert=True)
-            return
-        await send_running_notice(context.bot, q.message.chat_id, s, f'流媒体检测（{safe(region_label)}）')
-        asyncio.create_task(run_stream_task(context.bot, q.message.chat_id, s, jid))
+        jid, pos = enqueue_job(s, 'stream', run_stream_task, context.bot, q.message.chat_id, s, region=region_label)
+        await bot_queue_notice(context.bot, q.message.chat_id, s, f'流媒体检测（{safe(region_label)}）', pos)
     elif data.startswith('ntask:'):
         sid = data.split(':', 1)[1]
         s = find_server_by_id(sid)
@@ -2952,36 +3234,24 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not s:
             await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
             return
-        jid, key = start_job(s, 'nexttrace', target=target)
-        if not jid:
-            await q.answer('这台 NextTrace 已经在跑了', show_alert=True)
-            return
-        await send_running_notice(context.bot, q.message.chat_id, s, f'NextTrace {safe(target)}')
-        asyncio.create_task(run_nexttrace_task(context.bot, q.message.chat_id, s, jid, target))
+        jid, pos = enqueue_job(s, 'nexttrace', run_nexttrace_task, context.bot, q.message.chat_id, s, target, target=target)
+        await bot_queue_notice(context.bot, q.message.chat_id, s, f'NextTrace {safe(target)}', pos)
     elif data.startswith('bgp:'):
         sid = data.split(':', 1)[1]
         s = find_server_by_id(sid)
         if not s:
             await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
             return
-        jid, key = start_job(s, 'bgp')
-        if not jid:
-            await q.answer('这台 BGP 图已经在生成了', show_alert=True)
-            return
-        await send_running_notice(context.bot, q.message.chat_id, s, 'BGP 图任务')
-        asyncio.create_task(run_bgp_task(context.bot, q.message.chat_id, s, jid))
+        jid, pos = enqueue_job(s, 'bgp', run_bgp_task, context.bot, q.message.chat_id, s)
+        await bot_queue_notice(context.bot, q.message.chat_id, s, 'BGP 图任务', pos)
     elif data.startswith('ippure:'):
         sid = data.split(':', 1)[1]
         s = find_server_by_id(sid)
         if not s:
             await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
             return
-        jid, key = start_job(s, 'ippure')
-        if not jid:
-            await q.answer('这台 IPPure 图已经在生成了', show_alert=True)
-            return
-        await send_running_notice(context.bot, q.message.chat_id, s, 'IPPure 图任务')
-        asyncio.create_task(run_ippure_task(context.bot, q.message.chat_id, s, jid))
+        jid, pos = enqueue_job(s, 'ippure', run_ippure_task, context.bot, q.message.chat_id, s)
+        await bot_queue_notice(context.bot, q.message.chat_id, s, 'IPPure 图任务', pos)
     elif data.startswith('bgpip:'):
         ip = data.split(':', 1)[1]
         if not is_ipv4(ip):
@@ -3058,12 +3328,8 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ip_mode = '4'
         selected_text = nq_selected_text(mask)
         ip_text = nq_ip_mode_text(ip_mode)
-        jid, key = start_job(s, 'nq', selected=selected_text, ip_mode=ip_text)
-        if not jid:
-            await q.answer('这台 NQ 已经在跑了', show_alert=True)
-            return
-        await send_running_notice(context.bot, q.message.chat_id, s, f'NodeQuality（{safe(selected_text)}；{safe(ip_text)}）')
-        asyncio.create_task(run_nq_task(context.bot, q.message.chat_id, s, jid, mask, ip_mode))
+        jid, pos = enqueue_job(s, 'nq', run_nq_task, context.bot, q.message.chat_id, s, mask, ip_mode, selected=selected_text, ip_mode=ip_text)
+        await bot_queue_notice(context.bot, q.message.chat_id, s, f'NodeQuality（{safe(selected_text)}；{safe(ip_text)}）', pos)
     elif data.startswith('srv:'):
         sid = data.split(':', 1)[1]
         s = find_server_by_id(sid)
