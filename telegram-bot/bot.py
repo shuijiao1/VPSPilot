@@ -54,6 +54,8 @@ JOBS = {}
 RUNNING = set()
 PENDING_NEXTTRACE = {}
 ADD_SESSIONS = {}
+HISTORY_JSON = Path(os.environ.get('HISTORY_JSON', DATA_DIR / 'history.json'))
+HISTORY_LIMIT = int(os.environ.get('HISTORY_LIMIT', '200'))
 
 
 def startup_check():
@@ -66,6 +68,7 @@ def startup_check():
         problems.append('ALLOWED_USERS contains unsafe wildcard-like value')
     for d in (DATA_DIR, MEDIA_DIR, TMP_DIR, KEYS_DIR):
         d.mkdir(parents=True, exist_ok=True)
+    HISTORY_JSON.parent.mkdir(parents=True, exist_ok=True)
     if SERVERS_JSON.exists():
         try:
             inv = json.loads(SERVERS_JSON.read_text() or '{}')
@@ -627,6 +630,7 @@ def server_markup(s):
         rows.append(image_row)
     ops_row = [
         InlineKeyboardButton('📋 当前任务', callback_data=f'jobsrv:{sid}'),
+        InlineKeyboardButton('📜 历史记录', callback_data=f'hist:{sid}'),
         InlineKeyboardButton('🧪 测试SSH', callback_data=f'testssh:{sid}'),
     ]
     if tool_enabled('nexttrace'):
@@ -976,7 +980,121 @@ async def finish_bulk_add(update: Update, context: ContextTypes.DEFAULT_TYPE, se
 
 
 def job_id(kind, s):
-    return f"{kind}-{server_id(s)}-{int(time.time())}"
+    return f"{kind}-{server_id(s)}-{int(time.time() * 1000)}"
+
+KIND_NAME = {
+    'ipq': 'IP质量', 'nq': 'NodeQuality', 'gb5': 'GB5', 'stream': '流媒体检测',
+    'nexttrace': 'NextTrace', 'bgp': 'BGP图', 'ippure': 'IPPure图',
+}
+STATUS_ICON = {'queued': '🕒', 'running': '⏳', 'done': '✅', 'failed': '❌'}
+
+
+def iso_now():
+    return datetime.now().astimezone().isoformat(timespec='seconds')
+
+
+def load_history():
+    if not HISTORY_JSON.exists():
+        return []
+    try:
+        data = json.loads(HISTORY_JSON.read_text() or '[]')
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def save_history(items):
+    HISTORY_JSON.parent.mkdir(parents=True, exist_ok=True)
+    HISTORY_JSON.write_text(json.dumps(items[-HISTORY_LIMIT:], ensure_ascii=False, indent=2) + '\n')
+
+
+def history_append(jid, job):
+    item = {
+        'job_id': jid,
+        'server': job.get('server'),
+        'server_id': job.get('server_id'),
+        'kind': job.get('kind'),
+        'status': job.get('status'),
+        'target': job.get('target'),
+        'selected': job.get('selected'),
+        'ip_mode': job.get('ip_mode'),
+        'region': job.get('region'),
+        'started_at': job.get('started_at'),
+        'completed_at': job.get('completed_at'),
+        'duration_sec': job.get('duration_sec'),
+        'urls': extract_urls(job.get('log') or '')[:8],
+    }
+    hist = [x for x in load_history() if x.get('job_id') != jid]
+    hist.append(item)
+    save_history(hist)
+
+
+def start_job(s, kind, **extra):
+    key = (server_id(s), kind)
+    if key in RUNNING:
+        return None, key
+    RUNNING.add(key)
+    jid = job_id(kind, s)
+    now = iso_now()
+    JOBS[jid] = {
+        'status': 'running',
+        'server': s.get('name'),
+        'server_id': str(server_id(s)),
+        'kind': kind,
+        'started_at': now,
+        **extra,
+    }
+    return jid, key
+
+
+def finish_job(jid, key=None):
+    job = JOBS.get(jid) or {}
+    now = iso_now()
+    job.setdefault('status', 'done')
+    job['completed_at'] = now
+    try:
+        st = datetime.fromisoformat(str(job.get('started_at')))
+        en = datetime.fromisoformat(now)
+        job['duration_sec'] = max(0, int((en - st).total_seconds()))
+    except Exception:
+        pass
+    JOBS[jid] = job
+    history_append(jid, job)
+    if key:
+        RUNNING.discard(key)
+
+
+def server_history(s, limit=10):
+    sid = str(server_id(s))
+    name = str(s.get('name') or '')
+    host = str(s.get('host') or '')
+    out = []
+    for item in load_history():
+        if str(item.get('server_id') or '') == sid or str(item.get('server') or '') in (name, host, sid):
+            out.append(item)
+    return out[-limit:]
+
+
+def history_text(s):
+    items = server_history(s, 10)
+    if not items:
+        return f'📜 <b>{safe(s.get("name"))}</b> 暂无测试历史。'
+    lines = [f'📜 <b>{safe(s.get("name"))}</b> 最近测试历史']
+    for item in reversed(items):
+        icon = STATUS_ICON.get(item.get('status'), '•')
+        kind = KIND_NAME.get(item.get('kind'), item.get('kind') or '-')
+        extra = []
+        for k in ('target', 'selected', 'ip_mode', 'region'):
+            if item.get(k):
+                extra.append(str(item.get(k)))
+        dur = f" · {item.get('duration_sec')}s" if item.get('duration_sec') is not None else ''
+        when = item.get('completed_at') or item.get('started_at') or '-'
+        suffix = f" — {'；'.join(extra)}" if extra else ''
+        lines.append(f'{icon} {safe(kind)} · {safe(item.get("status"))}{safe(dur)}\n   <code>{safe(when)}</code>{safe(suffix)}')
+        urls = item.get('urls') or []
+        if urls:
+            lines.append('   ' + safe(urls[0]))
+    return '\n'.join(lines)
 
 
 def server_jobs(s):
@@ -995,16 +1113,12 @@ def job_status_text(s):
     jobs = server_jobs(s)
     if not jobs:
         return f'📋 <b>{safe(s.get("name"))}</b> 当前没有任务。'
-    status_icon = {'running': '⏳', 'done': '✅', 'failed': '❌'}
-    kind_name = {
-        'ipq': 'IP质量', 'nq': 'NodeQuality', 'gb5': 'GB5', 'stream': '流媒体检测',
-        'nexttrace': 'NextTrace', 'bgp': 'BGP图', 'ippure': 'IPPure图',
-    }
     lines = [f'📋 <b>{safe(s.get("name"))}</b> 当前任务']
     for jid, j in jobs[-10:]:
         status = j.get('status') or '-'
-        icon = status_icon.get(status, '•')
-        kind = kind_name.get(j.get('kind'), j.get('kind') or '-')
+        icon = STATUS_ICON.get(status, '•')
+        kind = KIND_NAME.get(j.get('kind'), j.get('kind') or '-')
+        dur = f" · {j.get('duration_sec')}s" if j.get('duration_sec') is not None else ''
         extra = []
         if j.get('target'):
             extra.append(str(j.get('target')))
@@ -1015,7 +1129,7 @@ def job_status_text(s):
         if j.get('region'):
             extra.append(str(j.get('region')))
         suffix = f" — {'；'.join(extra)}" if extra else ''
-        lines.append(f'{icon} <code>{safe(jid)}</code>\n   {safe(kind)} · {safe(status)}{safe(suffix)}')
+        lines.append(f'{icon} <code>{safe(jid)}</code>\n   {safe(kind)} · {safe(status)}{safe(dur)}{safe(suffix)}')
     return '\n'.join(lines)
 
 
@@ -1338,32 +1452,30 @@ async def send_png_and_cleanup(bot, chat_id, png, cleanup_dir=None):
 
 async def run_bgp_task(bot, chat_id, s, jid):
     key = (server_id(s), 'bgp')
-    RUNNING.add(key)
     try:
         ip = s.get('host')
         png = await generate_bgp_png(ip)
-        JOBS[jid] = {'status': 'done', 'server': s.get('name'), 'kind': 'bgp', 'log': str(png)}
+        JOBS[jid].update({'status': 'done', 'log': str(png)})
         await send_png_and_cleanup(bot, chat_id, png)
     except Exception as e:
-        JOBS[jid] = {'status': 'failed', 'log': repr(e), 'server': s.get('name'), 'kind': 'bgp'}
+        JOBS[jid].update({'status': 'failed', 'log': repr(e)})
         await bot.send_message(chat_id, f"❌ {safe(s.get('name'))} BGP 图失败：<code>{safe(e)}</code>", parse_mode=ParseMode.HTML)
     finally:
-        RUNNING.discard(key)
+        finish_job(jid, key)
 
 
 async def run_ippure_task(bot, chat_id, s, jid):
     key = (server_id(s), 'ippure')
-    RUNNING.add(key)
     try:
         ip = s.get('host')
         png = await generate_ippure_png(ip)
-        JOBS[jid] = {'status': 'done', 'server': s.get('name'), 'kind': 'ippure', 'log': str(png)}
+        JOBS[jid].update({'status': 'done', 'log': str(png)})
         await send_png_and_cleanup(bot, chat_id, png, Path(png).parent)
     except Exception as e:
-        JOBS[jid] = {'status': 'failed', 'log': repr(e), 'server': s.get('name'), 'kind': 'ippure'}
+        JOBS[jid].update({'status': 'failed', 'log': repr(e)})
         await bot.send_message(chat_id, f"❌ {safe(s.get('name'))} IPPure 图失败：<code>{safe(e)}</code>", parse_mode=ParseMode.HTML)
     finally:
-        RUNNING.discard(key)
+        finish_job(jid, key)
 
 
 def ip_tools_markup(ip):
@@ -1425,11 +1537,10 @@ async def send_report_images(bot, chat_id, report_links, prefix):
 
 async def run_ip_quality_task(bot, chat_id, s, jid):
     key = (server_id(s), 'ipq')
-    RUNNING.add(key)
     try:
         remote = "export TERM=xterm-256color; cd /tmp && bash <(curl -Ls https://IP.Check.Place) -y"
         code, out, url = await run_until_report(ssh_args(s, remote, tty=False), timeout=900, env=ssh_env_for(s))
-        JOBS[jid] = {'status': 'done' if code == 0 else 'failed', 'log': out, 'server': s.get('name'), 'kind': 'ipq'}
+        JOBS[jid].update({'status': 'done' if code == 0 else 'failed', 'log': out})
         if not url:
             await bot.send_message(chat_id, f"❌ {safe(s.get('name'))} IP质量没拿到报告链接。\n<pre>{safe(trim_log(out))}</pre>", parse_mode=ParseMode.HTML)
             return
@@ -1443,10 +1554,10 @@ async def run_ip_quality_task(bot, chat_id, s, jid):
         except Exception as e:
             await bot.send_message(chat_id, f"✅ {safe(s.get('name'))} IP质量报告：\n{safe(url)}\n\n{script_command_html('ipq')}\n\n转 PNG 失败：<code>{safe(e)}</code>", parse_mode=ParseMode.HTML)
     except Exception as e:
-        JOBS[jid] = {'status': 'failed', 'log': repr(e), 'server': s.get('name'), 'kind': 'ipq'}
+        JOBS[jid].update({'status': 'failed', 'log': repr(e)})
         await bot.send_message(chat_id, f"❌ {safe(s.get('name'))} IP质量任务失败：<code>{safe(e)}</code>", parse_mode=ParseMode.HTML)
     finally:
-        RUNNING.discard(key)
+        finish_job(jid, key)
 
 
 async def fetch_checkplace_svg_from_json(category, json_path):
@@ -1642,7 +1753,6 @@ def gb5_result_image(s, scores, out_png):
 
 async def run_gb5_task(bot, chat_id, s, jid):
     key = (server_id(s), 'gb5')
-    RUNNING.add(key)
     try:
         remote = (
             "set -e; export TERM=xterm-256color; cd /root; "
@@ -1665,16 +1775,16 @@ async def run_gb5_task(bot, chat_id, s, jid):
         gb_urls = [u for u in extract_urls(out) if 'browser.geekbench.com/v5/cpu/' in u]
         if gb_urls:
             scores['url'] = gb_urls[-1]
-        JOBS[jid] = {'status': 'done' if code == 0 and scores.get('url') else 'failed', 'log': out, 'server': s.get('name'), 'kind': 'gb5'}
+        JOBS[jid].update({'status': 'done' if code == 0 and scores.get('url') else 'failed', 'log': out})
         if code != 0 or not scores.get('url'):
             await bot.send_message(chat_id, f"❌ {safe(s.get('name'))} GB5 没拿到结果链接。\n<pre>{safe(trim_log(out))}</pre>", parse_mode=ParseMode.HTML)
             return
         await bot.send_message(chat_id, f"✅ {safe(s.get('name'))} GB5 完成\n{safe(scores['url'])}", parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     except Exception as e:
-        JOBS[jid] = {'status': 'failed', 'log': repr(e), 'server': s.get('name'), 'kind': 'gb5'}
+        JOBS[jid].update({'status': 'failed', 'log': repr(e)})
         await bot.send_message(chat_id, f"❌ {safe(s.get('name'))} GB5任务失败：<code>{safe(e)}</code>", parse_mode=ParseMode.HTML)
     finally:
-        RUNNING.discard(key)
+        finish_job(jid, key)
 
 def stream_clean_output(text):
     clean = strip_ansi(text or '')
@@ -2140,7 +2250,6 @@ def format_nexttrace_output(s, target, out, code):
 
 async def run_nexttrace_task(bot, chat_id, s, jid, target='1.1.1.1'):
     key = (server_id(s), 'nexttrace')
-    RUNNING.add(key)
     try:
         qt = shlex.quote(str(target))
         trace_cmd = 'nexttrace ' + qt
@@ -2153,7 +2262,7 @@ async def run_nexttrace_task(bot, chat_id, s, jid, target='1.1.1.1'):
             "script -qfec " + shlex.quote(trace_cmd) + " /dev/null 2>&1"
         )
         code, out = await run_subprocess(ssh_args(s, remote, tty=False), timeout=300, env=ssh_env_for(s))
-        JOBS[jid] = {'status': 'done' if code == 0 else 'failed', 'log': out, 'server': s.get('name'), 'kind': 'nexttrace', 'target': target}
+        JOBS[jid].update({'status': 'done' if code == 0 else 'failed', 'log': out, 'target': target})
         out_dir = Path('/tmp/guko-results')
         out_dir.mkdir(parents=True, exist_ok=True)
         png = out_dir / f"nexttrace-{server_id(s)}-{safe_target(target)}-{int(time.time())}.jpg"
@@ -2170,15 +2279,14 @@ async def run_nexttrace_task(bot, chat_id, s, jid, target='1.1.1.1'):
         else:
             await bot.send_message(chat_id, format_nexttrace_output(s, target, out, code), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     except Exception as e:
-        JOBS[jid] = {'status': 'failed', 'log': repr(e), 'server': s.get('name'), 'kind': 'nexttrace', 'target': target}
+        JOBS[jid].update({'status': 'failed', 'log': repr(e), 'target': target})
         await bot.send_message(chat_id, f"❌ {safe(s.get('name'))} NextTrace 失败：<code>{safe(e)}</code>", parse_mode=ParseMode.HTML)
     finally:
-        RUNNING.discard(key)
+        finish_job(jid, key)
 
 
 async def run_stream_task(bot, chat_id, s, jid):
     key = (server_id(s), 'stream')
-    RUNNING.add(key)
     try:
         region_id, region_label = stream_region_for_server(s)
         use_v4 = await remote_has_ipv4(s)
@@ -2194,7 +2302,7 @@ async def run_stream_task(bot, chat_id, s, jid):
             "bash $script " + proto_arg + " -R " + shlex.quote(region_id) + " 2>&1"
         )
         code, out = await run_subprocess(ssh_args(s, remote, tty=False), timeout=1800, env=ssh_env_for(s))
-        JOBS[jid] = {'status': 'done' if code == 0 else 'failed', 'log': out, 'server': s.get('name'), 'kind': 'stream', 'proto': proto_text, 'region': region_label}
+        JOBS[jid].update({'status': 'done' if code == 0 else 'failed', 'log': out, 'proto': proto_text, 'region': region_label})
         out_dir = Path('/tmp/guko-results')
         out_dir.mkdir(parents=True, exist_ok=True)
         png = out_dir / f"stream-{server_id(s)}-{int(time.time())}.jpg"
@@ -2214,15 +2322,14 @@ async def run_stream_task(bot, chat_id, s, jid):
                 msg = '⚠️ 脚本退出码不为 0，但下面是已抓到的输出：\n\n' + msg
             await bot.send_message(chat_id, msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     except Exception as e:
-        JOBS[jid] = {'status': 'failed', 'log': repr(e), 'server': s.get('name'), 'kind': 'stream'}
+        JOBS[jid].update({'status': 'failed', 'log': repr(e)})
         await bot.send_message(chat_id, f"❌ {safe(s.get('name'))} 流媒体检测失败：<code>{safe(e)}</code>", parse_mode=ParseMode.HTML)
     finally:
-        RUNNING.discard(key)
+        finish_job(jid, key)
 
 
 async def run_nq_task(bot, chat_id, s, jid, mask=NQ_ALL_MASK, ip_mode='4'):
     key = (server_id(s), 'nq')
-    RUNNING.add(key)
     try:
         selected_text = nq_selected_text(mask)
         ip_text = nq_ip_mode_text(ip_mode)
@@ -2230,7 +2337,7 @@ async def run_nq_task(bot, chat_id, s, jid, mask=NQ_ALL_MASK, ip_mode='4'):
         ipv_arg = nq_remote_ipv_arg(s, ip_mode)
         remote = "export TERM=xterm-256color; cd /root && script=$(mktemp /root/nodequality.XXXXXX.sh); curl -sL https://run.NodeQuality.com > $script; sed -i 's#rm -rf \"${work_dir}\"/#: # rm -rf \"${work_dir}\"/#' $script; printf %b " + shlex.quote(answers) + " | bash $script " + ipv_arg
         code, out = await run_subprocess(ssh_args(s, remote, tty=False), timeout=7200, env=ssh_env_for(s))
-        JOBS[jid] = {'status': 'done' if code == 0 else 'failed', 'log': out, 'server': s.get('name'), 'kind': 'nq', 'selected': selected_text, 'ip_mode': ip_text}
+        JOBS[jid].update({'status': 'done' if code == 0 else 'failed', 'log': out, 'selected': selected_text, 'ip_mode': ip_text})
         nq = nodequality_url(out)
         gb_urls = geekbench_urls(out)
         fixed_nq = None
@@ -2277,10 +2384,10 @@ async def run_nq_task(bot, chat_id, s, jid, mask=NQ_ALL_MASK, ip_mode='4'):
         msg += f"\n\n{script_command_html('nq', selected=selected_text, ip_mode=ip_text)}"
         await bot.send_message(chat_id, msg, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     except Exception as e:
-        JOBS[jid] = {'status': 'failed', 'log': repr(e), 'server': s.get('name'), 'kind': 'nq'}
+        JOBS[jid].update({'status': 'failed', 'log': repr(e)})
         await bot.send_message(chat_id, f"❌ {safe(s.get('name'))} NQ任务失败：<code>{safe(e)}</code>", parse_mode=ParseMode.HTML)
     finally:
-        RUNNING.discard(key)
+        finish_job(jid, key)
 
 
 async def send_or_edit(update: Update, text, markup=None):
@@ -2370,6 +2477,18 @@ async def testssh_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text(f'🧪 正在测试 {safe(s.get("name"))} SSH…', parse_mode=ParseMode.HTML)
     ok, out = await test_server_login(s)
     await msg.edit_text(('✅ SSH 登录成功：' if ok else '⚠️ SSH 登录失败：') + '<pre>' + safe(out[-1200:]) + '</pre>', parse_mode=ParseMode.HTML)
+
+
+async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await guard(update): return
+    if not context.args:
+        await update.message.reply_text('用法：/history <名字/IP/ID/别名>')
+        return
+    s = find_server(' '.join(context.args), load_inventory().get('servers', []))
+    if not s:
+        await update.message.reply_text('没找到这台服务器。')
+        return
+    await update.message.reply_text(history_text(s), parse_mode=ParseMode.HTML, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回操作面板', callback_data=f'srv:{server_id(s)}')]]))
 
 
 async def jobs_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2528,12 +2647,10 @@ async def fallback_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not target:
             await update.message.reply_text('没识别到 IP 或域名，已取消这次 NextTrace。')
             return
-        key = (server_id(s), 'nexttrace')
-        if key in RUNNING:
+        jid, key = start_job(s, 'nexttrace', target=target)
+        if not jid:
             await update.message.reply_text('这台 NextTrace 已经在跑了。')
             return
-        jid = job_id('nexttrace', s)
-        JOBS[jid] = {'status': 'running', 'server': s.get('name'), 'kind': 'nexttrace', 'target': target}
         await send_running_notice(context.bot, chat_id, s, f'NextTrace {safe(target)}')
         asyncio.create_task(run_nexttrace_task(context.bot, chat_id, s, jid, target))
         return
@@ -2552,6 +2669,7 @@ async def post_init(app: Application):
         BotCommand('exportconfig', '导出脱敏配置'),
         BotCommand('info', '查看单台操作面板：/info 名字/IP/ID'),
         BotCommand('jobs', '查看后台任务'),
+        BotCommand('history', '查看测试历史：/history 服务器'),
         BotCommand('ip', 'IP/域名工具：/ip 1.1.1.1'),
         BotCommand('nexttrace', '路由追踪：/nexttrace 服务器 目标'),
     ]
@@ -2585,12 +2703,10 @@ async def nexttrace_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not (extract_ipv4(target) or normalize_domain(target)):
         await update.message.reply_text('目标需要是 IPv4 或域名。')
         return
-    key = (server_id(s), 'nexttrace')
-    if key in RUNNING:
+    jid, key = start_job(s, 'nexttrace', target=target)
+    if not jid:
         await update.message.reply_text('这台 NextTrace 已经在跑了。')
         return
-    jid = job_id('nexttrace', s)
-    JOBS[jid] = {'status': 'running', 'server': s.get('name'), 'kind': 'nexttrace', 'target': target}
     asyncio.create_task(run_nexttrace_task(context.bot, update.effective_chat.id, s, jid, target))
     await update.message.reply_text(f'🛣 已启动 {safe(s.get("name"))} NextTrace：{safe(target)}', parse_mode=ParseMode.HTML)
 
@@ -2716,6 +2832,21 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton('↩️ 返回操作面板', callback_data=f'srv:{sid}')],
             ]),
         )
+    elif data.startswith('hist:'):
+        sid = data.split(':', 1)[1]
+        s = find_server_by_id(sid)
+        if not s:
+            await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
+            return
+        await q.edit_message_text(
+            history_text(s),
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton('🔄 刷新历史', callback_data=f'hist:{sid}')],
+                [InlineKeyboardButton('↩️ 返回操作面板', callback_data=f'srv:{sid}')],
+            ]),
+        )
     elif data.startswith('testssh:'):
         if not await admin_guard(update): return
         sid = data.split(':', 1)[1]
@@ -2763,12 +2894,10 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not s:
             await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
             return
-        key = (server_id(s), 'ipq')
-        if key in RUNNING:
+        jid, key = start_job(s, 'ipq')
+        if not jid:
             await q.answer('这台 IP质量已经在跑了', show_alert=True)
             return
-        jid = job_id('ipq', s)
-        JOBS[jid] = {'status': 'running', 'server': s.get('name'), 'kind': 'ipq'}
         await send_running_notice(context.bot, q.message.chat_id, s, 'IP质量任务')
         asyncio.create_task(run_ip_quality_task(context.bot, q.message.chat_id, s, jid))
     elif data.startswith('gb5:'):
@@ -2777,12 +2906,10 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not s:
             await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
             return
-        key = (server_id(s), 'gb5')
-        if key in RUNNING:
+        jid, key = start_job(s, 'gb5')
+        if not jid:
             await q.answer('这台 GB5 已经在跑了', show_alert=True)
             return
-        jid = job_id('gb5', s)
-        JOBS[jid] = {'status': 'running', 'server': s.get('name'), 'kind': 'gb5'}
         await send_running_notice(context.bot, q.message.chat_id, s, 'GB5')
         asyncio.create_task(run_gb5_task(context.bot, q.message.chat_id, s, jid))
     elif data.startswith('stream:') or data.startswith('streamrun:'):
@@ -2791,13 +2918,11 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not s:
             await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
             return
-        key = (server_id(s), 'stream')
-        if key in RUNNING:
+        region_id, region_label = stream_region_for_server(s)
+        jid, key = start_job(s, 'stream', region=region_label)
+        if not jid:
             await q.answer('这台流媒体检测已经在跑了', show_alert=True)
             return
-        jid = job_id('stream', s)
-        region_id, region_label = stream_region_for_server(s)
-        JOBS[jid] = {'status': 'running', 'server': s.get('name'), 'kind': 'stream', 'region': region_label}
         await send_running_notice(context.bot, q.message.chat_id, s, f'流媒体检测（{safe(region_label)}）')
         asyncio.create_task(run_stream_task(context.bot, q.message.chat_id, s, jid))
     elif data.startswith('ntask:'):
@@ -2820,12 +2945,10 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not s:
             await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
             return
-        key = (server_id(s), 'nexttrace')
-        if key in RUNNING:
+        jid, key = start_job(s, 'nexttrace', target=target)
+        if not jid:
             await q.answer('这台 NextTrace 已经在跑了', show_alert=True)
             return
-        jid = job_id('nexttrace', s)
-        JOBS[jid] = {'status': 'running', 'server': s.get('name'), 'kind': 'nexttrace', 'target': target}
         await send_running_notice(context.bot, q.message.chat_id, s, f'NextTrace {safe(target)}')
         asyncio.create_task(run_nexttrace_task(context.bot, q.message.chat_id, s, jid, target))
     elif data.startswith('bgp:'):
@@ -2834,12 +2957,10 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not s:
             await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
             return
-        key = (server_id(s), 'bgp')
-        if key in RUNNING:
+        jid, key = start_job(s, 'bgp')
+        if not jid:
             await q.answer('这台 BGP 图已经在生成了', show_alert=True)
             return
-        jid = job_id('bgp', s)
-        JOBS[jid] = {'status': 'running', 'server': s.get('name'), 'kind': 'bgp'}
         await send_running_notice(context.bot, q.message.chat_id, s, 'BGP 图任务')
         asyncio.create_task(run_bgp_task(context.bot, q.message.chat_id, s, jid))
     elif data.startswith('ippure:'):
@@ -2848,12 +2969,10 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not s:
             await q.edit_message_text('这台服务器不在当前清单里。', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩️ 返回列表', callback_data='act:list')]]))
             return
-        key = (server_id(s), 'ippure')
-        if key in RUNNING:
+        jid, key = start_job(s, 'ippure')
+        if not jid:
             await q.answer('这台 IPPure 图已经在生成了', show_alert=True)
             return
-        jid = job_id('ippure', s)
-        JOBS[jid] = {'status': 'running', 'server': s.get('name'), 'kind': 'ippure'}
         await send_running_notice(context.bot, q.message.chat_id, s, 'IPPure 图任务')
         asyncio.create_task(run_ippure_task(context.bot, q.message.chat_id, s, jid))
     elif data.startswith('bgpip:'):
@@ -2862,8 +2981,10 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer('无效 IPv4', show_alert=True)
             return
         pseudo = {'id': ip, 'name': ip, 'host': ip}
-        jid = job_id('bgp', pseudo)
-        JOBS[jid] = {'status': 'running', 'server': ip, 'kind': 'bgp'}
+        jid, key = start_job(pseudo, 'bgp')
+        if not jid:
+            await q.answer('这个 IP 的 BGP 图已经在生成了', show_alert=True)
+            return
         await send_running_notice(context.bot, q.message.chat_id, pseudo, 'BGP 图任务')
         asyncio.create_task(run_bgp_task(context.bot, q.message.chat_id, pseudo, jid))
     elif data.startswith('ippureip:'):
@@ -2872,8 +2993,10 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer('无效 IPv4', show_alert=True)
             return
         pseudo = {'id': ip, 'name': ip, 'host': ip}
-        jid = job_id('ippure', pseudo)
-        JOBS[jid] = {'status': 'running', 'server': ip, 'kind': 'ippure'}
+        jid, key = start_job(pseudo, 'ippure')
+        if not jid:
+            await q.answer('这个 IP 的 IPPure 图已经在生成了', show_alert=True)
+            return
         await send_running_notice(context.bot, q.message.chat_id, pseudo, 'IPPure 图任务')
         asyncio.create_task(run_ippure_task(context.bot, q.message.chat_id, pseudo, jid))
     elif data.startswith('nqask:'):
@@ -2924,16 +3047,14 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode=ParseMode.HTML, reply_markup=confirm_nq_markup(s, mask, ip_mode)
             )
             return
-        key = (server_id(s), 'nq')
-        if key in RUNNING:
-            await q.answer('这台 NQ 已经在跑了', show_alert=True)
-            return
-        jid = job_id('nq', s)
         if ip_mode == '46' and not server_has_ipv6(s):
             ip_mode = '4'
         selected_text = nq_selected_text(mask)
         ip_text = nq_ip_mode_text(ip_mode)
-        JOBS[jid] = {'status': 'running', 'server': s.get('name'), 'kind': 'nq', 'selected': selected_text, 'ip_mode': ip_text}
+        jid, key = start_job(s, 'nq', selected=selected_text, ip_mode=ip_text)
+        if not jid:
+            await q.answer('这台 NQ 已经在跑了', show_alert=True)
+            return
         await send_running_notice(context.bot, q.message.chat_id, s, f'NodeQuality（{safe(selected_text)}；{safe(ip_text)}）')
         asyncio.create_task(run_nq_task(context.bot, q.message.chat_id, s, jid, mask, ip_mode))
     elif data.startswith('srv:'):
@@ -2961,6 +3082,7 @@ def main():
     app.add_handler(CommandHandler('exportconfig', export_config_cmd))
     app.add_handler(CommandHandler('info', info_cmd))
     app.add_handler(CommandHandler('jobs', jobs_cmd))
+    app.add_handler(CommandHandler('history', history_cmd))
     app.add_handler(CommandHandler('ip', ip_cmd))
     app.add_handler(CommandHandler('nexttrace', nexttrace_cmd))
     app.add_handler(CallbackQueryHandler(on_button))
