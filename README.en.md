@@ -19,7 +19,7 @@
 - **Flexible SSH authentication**: Supports inherited default keys, per-server keys, existing key paths, uploaded / pasted private keys, and password login.
 - **Common test shortcuts**: Supports IP quality, NodeQuality, streaming unlock checks, NextTrace, GB5, and more.
 - **IP / domain tools**: Supports IPPure official images and bgp.tools BGP route images.
-- **Safe defaults**: Whitelist is required; remote command execution is disabled by default and must be explicitly enabled.
+- **Safe defaults**: Whitelist mode is required; GUKO focuses on common tests and does not provide a general remote command execution feature.
 - **Docker-friendly deployment**: Includes Docker Compose, Makefile, and initialization script.
 
 ---
@@ -287,10 +287,10 @@ Common commands:
 
 ```bash
 cd <install-dir>
-docker compose -f docker-compose.example.yml ps
-docker compose -f docker-compose.example.yml logs -f
-docker compose -f docker-compose.example.yml restart
-docker compose -f docker-compose.example.yml down
+docker compose ps
+docker compose logs -f
+docker compose restart
+docker compose down
 ```
 
 Upgrade:
@@ -298,7 +298,8 @@ Upgrade:
 ```bash
 cd <install-dir>
 git pull
-docker compose -f docker-compose.example.yml up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 Or use Makefile:
@@ -420,3 +421,17 @@ make check
 ## License
 
 MIT
+
+---
+
+## ⚙️ Versioning and Releases
+
+- Current version: `v0.1.3`
+- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
+- Docker images are published as `latest`, `v0.1.3`, and commit sha tags
+- GitHub Releases are generated from `CHANGELOG.md`
+- Maintainers can publish a new version with:
+
+```bash
+./release.sh <version> "release notes"
+```

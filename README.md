@@ -286,10 +286,10 @@ GUKO/
 
 ```bash
 cd <安装目录>
-docker compose -f docker-compose.example.yml ps
-docker compose -f docker-compose.example.yml logs -f
-docker compose -f docker-compose.example.yml restart
-docker compose -f docker-compose.example.yml down
+docker compose ps
+docker compose logs -f
+docker compose restart
+docker compose down
 ```
 
 升级：
@@ -297,7 +297,8 @@ docker compose -f docker-compose.example.yml down
 ```bash
 cd <安装目录>
 git pull
-docker compose -f docker-compose.example.yml up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 也可以使用 Makefile：
@@ -383,6 +384,20 @@ Bot 内还可以导出脱敏配置：
 - BGP 图和 IPPure 图是在 Bot 容器本地生成；默认 Dockerfile 已包含 Node.js、Playwright、Chromium 和渲染依赖。
 - 如果 `BGP_FETCH` 或 `IPPURE_DOWNLOAD` 指向的脚本不存在，Bot 会尝试自动下载工具脚本；失败时会给出明确错误。
 - 可以通过环境变量关闭某些按钮：`ENABLE_BGP=false`、`ENABLE_IPPURE=false`、`ENABLE_IPQ=false`、`ENABLE_NQ=false`、`ENABLE_GB5=false`、`ENABLE_STREAM=false`、`ENABLE_NEXTTRACE=false`。
+
+---
+
+## ⚙️ 版本与发布
+
+- 当前版本：`v0.1.3`
+- 更新记录见 [`CHANGELOG.md`](CHANGELOG.md)
+- Docker 镜像会发布 `latest`、`v0.1.3` 和 commit sha 标签
+- GitHub Release 会根据 `CHANGELOG.md` 自动生成说明
+- 维护者发布新版本可使用：
+
+```bash
+./release.sh <version> "更新说明"
+```
 
 ---
 
