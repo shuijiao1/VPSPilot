@@ -72,6 +72,22 @@ function arg(name, fallback = '') {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   }).catch(() => {});
 
+  // Hide/mask the queried IP before exporting the official PNG. IPPure exposes this as
+  // the eye button next to the camera button; click it first so downloaded images do not
+  // leak the full IP address.
+  const hideIpButton = page.locator('button.screenshot-btn').filter({ has: page.locator('svg.lucide-eye') }).first();
+  if (await hideIpButton.count()) {
+    await hideIpButton.click({ timeout: 10000 });
+    await page.waitForFunction((targetIp) => {
+      const card = document.querySelector('.iptable-container');
+      const text = card?.innerText || '';
+      return !text.includes(targetIp);
+    }, ip, { timeout: 5000 }).catch(() => {});
+    await page.evaluate(async () => {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }).catch(() => {});
+  }
+
   const cameraButton = page.locator('button.screenshot-btn').filter({ has: page.locator('svg.lucide-camera') }).first();
   const downloadPromise = page.waitForEvent('download', { timeout: 30000 });
   await cameraButton.click({ timeout: 10000 });
