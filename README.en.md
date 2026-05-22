@@ -94,6 +94,25 @@ ADMIN_USERS=123456789
 
 After startup, send `/addserver` to the Bot to add your first server.
 
+### Upgrading old deployments to `name: guko`
+
+If you deployed GUKO before this change, the old Compose project may be shown as the deployment directory name, such as `server-manager`. The new Compose file pins the project name to `guko`.
+
+Use the migration script. It will:
+
+1. Add `name: guko` to your local `docker-compose.yml`;
+2. Stop and remove the old `guko-bot` container if it belongs to another Compose project, avoiding `container_name: guko-bot` conflicts;
+3. Keep host-mounted data such as `servers.json`, `keys/`, `media/`, `results/`, and `history.json`;
+4. Pull the latest image and start the service again.
+
+```bash
+cd /path/to/your/guko
+curl -fsSLo migrate-compose-project.sh https://raw.githubusercontent.com/shuijiao1/GUKO/main/scripts/migrate-compose-project.sh
+bash migrate-compose-project.sh
+```
+
+Manual upgrade also works: update the compose file first, then remove the old container if Docker reports a container-name conflict, and start Compose again.
+
 ### Method 2: Source build (development)
 
 ```bash
@@ -428,9 +447,9 @@ MIT
 
 ## ⚙️ Versioning and Releases
 
-- Current version: `v0.1.6`
+- Current version: `v0.1.7`
 - Changelog: [`CHANGELOG.md`](CHANGELOG.md)
-- Docker images are published as `latest`, `v0.1.6`, and commit sha tags
+- Docker images are published as `latest`, `v0.1.7`, and commit sha tags
 - GitHub Releases are generated from `CHANGELOG.md`
 - Maintainers can publish a new version with:
 

@@ -93,6 +93,25 @@ ADMIN_USERS=123456789
 
 启动后在 Bot 里发送 `/addserver` 添加第一台服务器。
 
+### 老版本升级到 `name: guko`
+
+如果你之前已经部署过 GUKO，旧 Compose project 可能会显示成部署目录名，例如 `server-manager`。新版 Compose 已固定为 `guko`。
+
+推荐用迁移脚本升级，它会：
+
+1. 给本地 `docker-compose.yml` 补上 `name: guko`；
+2. 如果发现旧 project 下已有 `guko-bot` 容器，会先停止并删除旧容器，避免 `container_name: guko-bot` 冲突；
+3. 保留宿主机上的 `servers.json`、`keys/`、`media/`、`results/`、`history.json` 等数据；
+4. 拉取最新镜像并重新启动。
+
+```bash
+cd /path/to/your/guko
+curl -fsSLo migrate-compose-project.sh https://raw.githubusercontent.com/shuijiao1/GUKO/main/scripts/migrate-compose-project.sh
+bash migrate-compose-project.sh
+```
+
+手动升级也可以：先更新 compose 文件，再在遇到容器名冲突时删除旧容器后重启。
+
 ### 方式二：源码构建（开发用）
 
 ```bash
@@ -391,9 +410,9 @@ Bot 内还可以导出脱敏配置：
 
 ## ⚙️ 版本与发布
 
-- 当前版本：`v0.1.6`
+- 当前版本：`v0.1.7`
 - 更新记录见 [`CHANGELOG.md`](CHANGELOG.md)
-- Docker 镜像会发布 `latest`、`v0.1.6` 和 commit sha 标签
+- Docker 镜像会发布 `latest`、`v0.1.7` 和 commit sha 标签
 - GitHub Release 会根据 `CHANGELOG.md` 自动生成说明
 - 维护者发布新版本可使用：
 
