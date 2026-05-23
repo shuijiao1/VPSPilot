@@ -382,12 +382,9 @@ You can also export sanitized config from the Bot:
 
 ---
 
-## 🧩 Optional tool preparation
+## 🧩 Optional tools
 
-- IP quality / NodeQuality / streaming / NextTrace / GB5 are executed on the target server through SSH. Dependencies are installed or downloaded by the upstream scripts on first run.
-- BGP and IPPure images are generated locally inside the Bot container. The default Dockerfile includes Node.js, Playwright, Chromium, and rendering dependencies.
-- If scripts referenced by `BGP_FETCH` or `IPPURE_DOWNLOAD` do not exist, the Bot will try to download helper scripts automatically and show a clear error on failure.
-- You can disable selected buttons with environment variables: `ENABLE_BGP=false`, `ENABLE_IPPURE=false`, `ENABLE_IPQ=false`, `ENABLE_NQ=false`, `ENABLE_GB5=false`, `ENABLE_STREAM=false`, `ENABLE_NEXTTRACE=false`.
+GUKO can enable IP quality, NodeQuality, streaming unlock checks, NextTrace, GB5, BGP images, IPPure images, and other tools as needed. Related buttons can be disabled with environment variables.
 
 ---
 
@@ -426,15 +423,3 @@ make check
 MIT
 
 ---
-
-## ⚙️ Versioning and Releases
-
-- Current version: `v0.1.8`
-- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
-- Docker images are published as `latest`, `v0.1.8`, and commit sha tags
-- GitHub Releases are generated from `CHANGELOG.md`
-- Maintainers can publish a new version with:
-
-```bash
-./release.sh <version> "release notes"
-```

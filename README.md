@@ -151,13 +151,7 @@ hk-01 203.0.113.10 22 root
 jp-01 203.0.113.20:2222 debian
 ```
 
-然后 Bot 会询问登录方式：
-
-- **沿用默认密钥/配置**：使用 `GUKO_DEFAULT_KEY` 或 `servers.json` 里的 `defaults.ssh.key`。
-- **使用已有密钥路径**：发送 `/data/keys/id_ed25519` 这类路径。
-- **上传/粘贴新私钥**：发送 SSH 私钥文本，或直接上传私钥文件；Bot 会保存到 `/data/keys/`，权限设为 `600`，并尝试 SSH 登录测试。
-- **使用密码**：发送 SSH 密码；Bot 会保存配置并尝试登录测试。
-- **先只保存，不测试登录**：只写入服务器清单，后续再补认证。
+然后 Bot 会询问登录方式，支持密钥路径、上传 / 粘贴私钥、密码或先保存后测试。
 
 添加后可用按钮或命令测试：
 
@@ -381,26 +375,11 @@ Bot 内还可以导出脱敏配置：
 
 ---
 
-## 🧩 可选工具自动准备
+## 🧩 可选工具
 
-- IP 质量 / NodeQuality / 流媒体 / NextTrace / GB5 都是在目标服务器通过 SSH 执行对应公开脚本；首次运行会按脚本自身逻辑安装或下载依赖。
-- BGP 图和 IPPure 图是在 Bot 容器本地生成；默认 Dockerfile 已包含 Node.js、Playwright、Chromium 和渲染依赖。
-- 如果 `BGP_FETCH` 或 `IPPURE_DOWNLOAD` 指向的脚本不存在，Bot 会尝试自动下载工具脚本；失败时会给出明确错误。
-- 可以通过环境变量关闭某些按钮：`ENABLE_BGP=false`、`ENABLE_IPPURE=false`、`ENABLE_IPQ=false`、`ENABLE_NQ=false`、`ENABLE_GB5=false`、`ENABLE_STREAM=false`、`ENABLE_NEXTTRACE=false`。
+GUKO 支持按需启用 IP 质量、NodeQuality、流媒体、NextTrace、GB5、BGP 图和 IPPure 图等功能。相关按钮可以通过环境变量关闭。
 
 ---
-
-## ⚙️ 版本与发布
-
-- 当前版本：`v0.1.8`
-- 更新记录见 [`CHANGELOG.md`](CHANGELOG.md)
-- Docker 镜像会发布 `latest`、`v0.1.8` 和 commit sha 标签
-- GitHub Release 会根据 `CHANGELOG.md` 自动生成说明
-- 维护者发布新版本可使用：
-
-```bash
-./release.sh <version> "更新说明"
-```
 
 ---
 
