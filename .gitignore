@@ -9,3 +9,6 @@ results/
 *.bak*
 __pycache__/
 *.pyc
+
+docker-compose.yml
+history.json

@@ -71,8 +71,16 @@ def startup_check():
         problems.append('ALLOWED_USERS is empty; GUKO requires whitelist mode')
     if '*' in ALLOWED_USERS or '0' in ALLOWED_USERS:
         problems.append('ALLOWED_USERS contains unsafe wildcard-like value')
-    for d in (DATA_DIR, MEDIA_DIR, TMP_DIR, KEYS_DIR, RESULTS_DIR):
+    for d in (DATA_DIR, MEDIA_DIR, TMP_DIR, RESULTS_DIR):
         d.mkdir(parents=True, exist_ok=True)
+    KEYS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(KEYS_DIR, 0o700)
+        for key_file in KEYS_DIR.iterdir():
+            if key_file.is_file():
+                os.chmod(key_file, 0o600)
+    except Exception as e:
+        problems.append(f'failed to tighten key permissions: {e}')
     HISTORY_JSON.parent.mkdir(parents=True, exist_ok=True)
     if SERVERS_JSON.exists():
         try:
