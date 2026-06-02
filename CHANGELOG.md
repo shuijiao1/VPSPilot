@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.12] - 2026-06-02
+
+- 新增 VLESS 与 Snell 管理入口；VLESS 安装可选择纯 VLESS 或 Vision + Reality。
+
 ## [0.1.11] - 2026-06-02
 
 - 回退 Check.Place 报告渲染为原 Python/Pillow 终端网格方案，移除实验性的浏览器截图渲染。

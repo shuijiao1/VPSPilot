@@ -7,7 +7,7 @@
 
 **轻量 VPS / 服务器管理 Telegram Bot：服务器状态面板、SSH 登录管理、常用测试脚本入口**
 
-> 私聊打开 Bot 就能查看服务器列表、状态详情、流量与资源占用；支持在 Telegram 内添加服务器、测试 SSH、运行 IP 质量 / NodeQuality / 流媒体 / NextTrace / GB5 等常用检测。  
+> 私聊打开 Bot 就能查看服务器列表、状态详情、流量与资源占用；支持在 Telegram 内添加服务器、测试 SSH、运行 IP 质量 / NodeQuality / 流媒体 / NextTrace / GB5 等常用检测。
 > 默认白名单模式，适合自托管。
 
 ---
@@ -17,7 +17,7 @@
 - **服务器状态面板**：展示在线数量、CPU / 内存 / 硬盘、流量、实时网速、系统信息等。
 - **Telegram 内添加服务器**：支持单台添加、批量导入、编辑、删除和 SSH 连通性测试。
 - **灵活 SSH 鉴权**：支持默认密钥继承、每台独立密钥、已有密钥路径、上传 / 粘贴私钥、密码登录。
-- **常用测试入口**：支持 IP 质量、NodeQuality、流媒体解锁、NextTrace、GB5 等任务。
+- **常用测试与协议入口**：支持 IP 质量、NodeQuality、流媒体解锁、NextTrace、GB5、SS-Rust、AnyTLS、VLESS、Snell 等任务。
 - **IP / 域名工具**：支持 IPPure 官方图片与 bgp.tools BGP 路由图。
 - **适合 Docker 部署**：提供 Docker Compose、Makefile 和初始化脚本。
 
@@ -255,6 +255,10 @@ ALLOW_INSECURE_STARTUP=false
 | `ENABLE_IPQ` | 否 | `true` | 是否启用 IP 质量功能 |
 | `ENABLE_NQ` | 否 | `true` | 是否启用 NodeQuality 功能 |
 | `ENABLE_GB5` | 否 | `true` | 是否启用 GB5 功能 |
+| `ENABLE_SS` | 否 | `true` | 是否启用 SS-Rust 管理入口 |
+| `ENABLE_ANYTLS` | 否 | `true` | 是否启用 AnyTLS 管理入口 |
+| `ENABLE_VLESS` | 否 | `true` | 是否启用 VLESS 管理入口 |
+| `ENABLE_SNELL` | 否 | `true` | 是否启用 Snell 管理入口 |
 | `ENABLE_STREAM` | 否 | `true` | 是否启用流媒体检测 |
 | `ENABLE_NEXTTRACE` | 否 | `true` | 是否启用 NextTrace |
 | `BGP_FETCH` | 否 | `/data/tools/bgp_fetch.py` | BGP 图片工具脚本路径 |
@@ -377,7 +381,7 @@ Bot 内还可以导出脱敏配置：
 
 ## 🧩 可选工具
 
-GUKO 支持按需启用 IP 质量、NodeQuality、流媒体、NextTrace、GB5、BGP 图和 IPPure 图等功能。相关按钮可以通过环境变量关闭。
+GUKO 支持按需启用 IP 质量、NodeQuality、流媒体、NextTrace、GB5、BGP 图、IPPure 图、SS-Rust、AnyTLS、VLESS、Snell 等功能。相关按钮可以通过环境变量关闭。
 
 ---
 

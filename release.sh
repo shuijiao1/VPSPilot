@@ -35,16 +35,19 @@ fi
 python3 - "$version" "$notes" <<'PYHELP'
 import datetime, json, re, sys
 from pathlib import Path
+
 version, notes = sys.argv[1], sys.argv[2]
 root = Path('.')
+
 if (root / 'version.txt').exists():
-    (root / 'version.txt').write_text(version + '
-')
+    (root / 'version.txt').write_text(version + '\n')
+
 for path in root.glob('*.sh'):
     text = path.read_text()
-    text = re.sub(r'^(VERSION=")[0-9]+\.[0-9]+\.[0-9]+(".*)$', rf'\g<1>{version}', text, flags=re.M)
-    text = re.sub(r'^(SCRIPT_VERSION=")[0-9]+\.[0-9]+\.[0-9]+(".*)$', rf'\g<1>{version}', text, flags=re.M)
+    text = re.sub(r'^(VERSION=")[0-9]+\.[0-9]+\.[0-9]+(".*)$', rf'\g<1>{version}\g<2>', text, flags=re.M)
+    text = re.sub(r'^(SCRIPT_VERSION=")[0-9]+\.[0-9]+\.[0-9]+(".*)$', rf'\g<1>{version}\g<2>', text, flags=re.M)
     path.write_text(text)
+
 for name in ['package.json', 'package-lock.json']:
     p = root / name
     if p.exists():
@@ -52,35 +55,32 @@ for name in ['package.json', 'package-lock.json']:
         data['version'] = version
         if name == 'package-lock.json' and 'packages' in data and '' in data['packages']:
             data['packages']['']['version'] = version
-        p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '
-')
+        p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n')
+
 bot = root / 'telegram-bot' / 'bot.py'
 if bot.exists():
     text = bot.read_text()
     text = re.sub(r"GUKO_VERSION = os\.environ\.get\('GUKO_VERSION', '[^']+'\)\.strip\(\) or '[^']+'", f"GUKO_VERSION = os.environ.get('GUKO_VERSION', '{version}').strip() or '{version}'", text)
     bot.write_text(text)
+
 env = root / '.env.example'
 if env.exists():
     text = env.read_text()
     text = re.sub(r'^GUKO_VERSION=.*$', f'GUKO_VERSION={version}', text, flags=re.M)
     env.write_text(text)
+
 changelog = root / 'CHANGELOG.md'
-entry = f"## [{version}] - {datetime.date.today().isoformat()}
-
-- {notes}
-
-"
+entry = f"## [{version}] - {datetime.date.today().isoformat()}\n\n- {notes}\n\n"
 if changelog.exists():
     text = changelog.read_text()
     if f'## [{version}]' not in text:
-        text = re.sub(r'(# Changelog
-
-)', r'' + entry, text, count=1)
+        if text.startswith('# Changelog\n\n'):
+            text = '# Changelog\n\n' + entry + text[len('# Changelog\n\n'):]
+        else:
+            text = '# Changelog\n\n' + entry + text
     changelog.write_text(text)
 else:
-    changelog.write_text('# Changelog
-
-' + entry)
+    changelog.write_text('# Changelog\n\n' + entry)
 PYHELP
 
 git add -A

@@ -5,9 +5,9 @@
 
 [中文](README.md) | **English**
 
-**A lightweight VPS / server management Telegram Bot: server status dashboard, SSH login management, and common benchmark / diagnostic tools.**
+**A lightweight VPS / server management Telegram Bot: server status dashboard, SSH login management, common diagnostics, and protocol management entries.**
 
-> Open a private chat with the Bot to view server lists, status details, traffic, and resource usage. Add servers, test SSH, and run IP quality, NodeQuality, streaming unlock, NextTrace, GB5, and other common checks from Telegram.  
+> Open a private chat with the Bot to view server lists, status details, traffic, and resource usage. Add servers, test SSH, and run IP quality, NodeQuality, streaming unlock, NextTrace, GB5, SS-Rust, AnyTLS, VLESS, Snell, and other common checks from Telegram.
 > Whitelist mode is enabled by default, making it suitable for self-hosting.
 
 ---
